@@ -20,7 +20,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENTS = ROOT / "custom_components"
 PACKAGE = COMPONENTS / "couchmate"
-EXPECTED_VERSION = "1.4.0-beta.1"
+EXPECTED_VERSION = "1.4.0-beta.2"
 EXPECTED_BRAND = "CouchMate Core Dev Preview"
 FORBIDDEN_NAMESPACES = ("couchmate_dev", "couchmate-dev")
 
@@ -244,6 +244,7 @@ def class_literal(node: ast.ClassDef, name: str) -> str | None:
 def check_http_views() -> None:
     """Verify canonical, unique and registered Home Assistant HTTP views."""
     views: dict[str, tuple[str, str, str]] = {}
+    view_nodes: dict[str, ast.ClassDef] = {}
     trees: dict[Path, ast.AST] = {}
     for path in sorted(PACKAGE.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -264,6 +265,7 @@ def check_http_views() -> None:
             require(name is not None, f"{node.name} has no literal name")
             require(node.name not in views, f"duplicate HTTP view class {node.name}")
             views[node.name] = (url, name, relative(path))
+            view_nodes[node.name] = node
 
     require(len(views) == 29, f"expected 29 HTTP views, found {len(views)}")
     urls = [item[0] for item in views.values()]
@@ -291,6 +293,29 @@ def check_http_views() -> None:
             actual[:2] == expected,
             f"required v1 view {class_name} changed: expected {expected}, found {actual[:2]}",
         )
+
+    # Home Assistant dispatches path placeholders as keyword arguments:
+    # ``handler(request, **request.match_info)``. A handler that omits one of
+    # these names fails with HTTP 500 before its body is entered.
+    http_methods = {"get", "post", "put", "patch", "delete"}
+    for class_name, (url, _, path) in views.items():
+        placeholders = set(re.findall(r"{([A-Za-z_][A-Za-z0-9_]*)}", url))
+        if not placeholders:
+            continue
+        handlers = [
+            item
+            for item in view_nodes[class_name].body
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and item.name in http_methods
+        ]
+        require(handlers, f"dynamic HTTP view {class_name} has no handler")
+        for handler in handlers:
+            parameters = {argument.arg for argument in handler.args.args}
+            missing = sorted(placeholders - parameters)
+            require(
+                handler.args.kwarg is not None or not missing,
+                f"{path}:{class_name}.{handler.name} cannot accept route arguments {missing}",
+            )
 
     registrations: Counter[str] = Counter()
     view_names = set(views)
