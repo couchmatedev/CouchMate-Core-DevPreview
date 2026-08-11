@@ -28,6 +28,15 @@ def _manager(hass: HomeAssistant) -> PairingManager:
     return hass.data[DOMAIN][PAIRING_MANAGER]
 
 
+def _pairing_response(payload: Mapping[str, Any], status: int = 200) -> web.Response:
+    """Return sensitive pairing state without allowing intermediary caching."""
+    return web.json_response(
+        payload,
+        status=status,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 def _json_safe(value: Any) -> Any:
     """Convert Home Assistant values into JSON-safe primitives."""
     if value is None or isinstance(value, (str, int, float, bool)):
@@ -177,7 +186,7 @@ class CouchMateInfoView(HomeAssistantView):
         hass = request.app["hass"]
         return web.json_response({
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.3.0-beta.2",
+            "version": "1.3.0-beta.3",
             "domain": DOMAIN,
             "filtered_entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
             "pairing": True,
@@ -193,7 +202,7 @@ class PairingCreateView(HomeAssistantView):
     async def post(self, request: web.Request) -> web.Response:
         hass = request.app["hass"]
         if DOMAIN not in hass.data:
-            return web.json_response({"error": "not_configured"}, status=503)
+            return _pairing_response({"error": "not_configured"}, status=503)
         try:
             data = await request.json()
         except Exception:
@@ -218,12 +227,13 @@ class PairingCreateView(HomeAssistantView):
         persistent_notification.async_create(
             hass,
             f"Ein Apple TV namens **{session.device_name}** möchte sich mit CouchMate verbinden. "
-            f"Kopplungscode: **{session.code}**.{rights_notice} Bestätige ihn über den Dienst "
-            f"`{DOMAIN}.approve_pairing`.",
+            f"Kopplungscode: **{session.code}**.{rights_notice} Öffne in der Sidebar "
+            "**CouchMate Core Dev Preview → Apple TVs & Design**, oder bestätige ihn "
+            f"über den Dienst `{DOMAIN}.approve_pairing`.",
             title="CouchMate Core Dev Preview – Kopplungsanfrage",
             notification_id=f"{DOMAIN}_pairing_{session.session_id}",
         )
-        return web.json_response(session.public_dict())
+        return _pairing_response(session.public_dict())
 
 
 class PairingStatusView(HomeAssistantView):
@@ -235,11 +245,11 @@ class PairingStatusView(HomeAssistantView):
         session_id = request.query.get("session_id", "")
         session = _manager(request.app["hass"]).get_by_session_id(session_id)
         if not session:
-            return web.json_response({"error": "session_not_found"}, status=404)
+            return _pairing_response({"error": "session_not_found"}, status=404)
         payload = session.public_dict()
         if session.status == PairingStatus.APPROVED:
             payload["exchange_token"] = session.exchange_token
-        return web.json_response(payload)
+        return _pairing_response(payload)
 
 
 class PairingApproveView(HomeAssistantView):
@@ -253,13 +263,13 @@ class PairingApproveView(HomeAssistantView):
         code = str(data.get("code", ""))
         pending = manager.get_by_code(code)
         if not pending:
-            return web.json_response({"error": "code_not_found"}, status=404)
+            return _pairing_response({"error": "code_not_found"}, status=404)
         if pending.capabilities:
             user = request.get("hass_user")
             if user is None or not getattr(user, "is_admin", False):
-                return web.json_response({"error": "admin_required"}, status=403)
+                return _pairing_response({"error": "admin_required"}, status=403)
         session = manager.approve(code)
-        return web.json_response(session.public_dict())
+        return _pairing_response(session.public_dict())
 
 
 class PairingExchangeView(HomeAssistantView):
@@ -273,8 +283,8 @@ class PairingExchangeView(HomeAssistantView):
             str(data.get("session_id", "")), str(data.get("exchange_token", ""))
         )
         if not credentials:
-            return web.json_response({"error": "exchange_denied"}, status=403)
-        return web.json_response(credentials)
+            return _pairing_response({"error": "exchange_denied"}, status=403)
+        return _pairing_response(credentials)
 
 
 async def _client_id_from_request(request: web.Request) -> str | None:
@@ -300,11 +310,11 @@ class PairingCancelView(HomeAssistantView):
             str(data.get("session_id", ""))
         )
         if not session:
-            return web.json_response({"error": "session_not_found"}, status=404)
+            return _pairing_response({"error": "session_not_found"}, status=404)
         persistent_notification.async_dismiss(
             request.app["hass"], f"{DOMAIN}_pairing_{session.session_id}"
         )
-        return web.json_response(session.public_dict())
+        return _pairing_response(session.public_dict())
 
 
 class CouchMateClientInfoView(HomeAssistantView):
@@ -320,7 +330,7 @@ class CouchMateClientInfoView(HomeAssistantView):
         return web.json_response({
             "client_id": client_id,
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.3.0-beta.2",
+            "version": "1.3.0-beta.3",
             "status": "active",
             "entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
         })

@@ -16,6 +16,10 @@ Dieses Repository bleibt als eigenständiger Beta-Kanal bestehen. Neue Funktione
 
 Die Dev Preview erscheint mit einer eigenen Sidebar unter **CouchMate Core Dev Preview**. Ihre Dienste beginnen mit `couchmate_dev.`; die Dev-Preview-API liegt unter `/api/couchmate_dev`.
 
+## Kopplungsanfragen
+
+Offene Kopplungsanfragen werden unter **Apple TVs & Design** direkt in der Home-Assistant-Sidebar angezeigt. Administratoren können dort den Gerätenamen, Kopplungscode, die verbleibende Zeit und angeforderte Zusatzrechte prüfen sowie die Anfrage zulassen oder ablehnen.
+
 ## Hintergrund-Vererbung
 
 In **Apple TVs & Design** kann ein gemeinsamer Wohnungs-Hintergrund gewählt werden. Räume ohne eigenes Bild übernehmen ihn automatisch. Ein eigenes Raumbild hat Vorrang; wird diese Raum-Ausnahme entfernt, verwendet der Raum wieder den Wohnungs-Hintergrund. Das Entfernen des Wohnungs-Hintergrunds verändert vorhandene Raum-Ausnahmen nicht.
@@ -39,6 +43,10 @@ This repository remains available as a dedicated beta channel. New features are 
 5. Open **Settings → Devices & services → Add integration** and select **CouchMate Core Dev Preview**.
 
 The dev preview has its own **CouchMate Core Dev Preview** sidebar entry. Its services start with `couchmate_dev.`, and its API is available under `/api/couchmate_dev`.
+
+## Pairing requests
+
+Pending pairing requests appear directly under **Apple TVs & Design** in the Home Assistant sidebar. Administrators can review the device name, pairing code, remaining time, and requested additional permissions, then approve or reject the request.
 
 ## Background inheritance
 

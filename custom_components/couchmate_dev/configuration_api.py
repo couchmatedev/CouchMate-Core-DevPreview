@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import quote
 
 from aiohttp import web
+from homeassistant.components import persistent_notification
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
@@ -26,10 +27,11 @@ from .backgrounds import (
 )
 from .configuration import ConfigurationManager, ConflictError, NotFoundError, ValidationError
 from .const import BACKGROUND_MANAGER, CONFIGURATION_MANAGER, DOMAIN, PAIRING_MANAGER
-from .pairing import PairingManager
+from .pairing import PairingManager, PairingSession, PairingStatus
 
 _VARIANTS = {VARIANT_THUMBNAIL, VARIANT_1080P, VARIANT_2160P}
 _REVISION_RE = re.compile(r"^[a-f0-9]{64}$")
+_PAIRING_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 _CLIENT_REPRESENTATION_VERSION = 2
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +58,46 @@ def _error(code: str, status: int, message: str | None = None, **extra) -> web.R
 def _require_admin(request: web.Request) -> web.Response | None:
     user = request.get("hass_user")
     return None if user is not None and getattr(user, "is_admin", False) else _error("admin_required", 403)
+
+
+def _no_store(response: web.Response) -> web.Response:
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _admin_pairing_payload(session: PairingSession) -> dict[str, Any]:
+    """Serialize a pairing request without exposing its exchange secret."""
+    status = session.refresh_status()
+    return {
+        "session_id": session.session_id,
+        "code": session.code,
+        "device_name": session.device_name,
+        "status": status.value,
+        "created_at": session.created_at.isoformat(),
+        "expires_at": session.expires_at.isoformat(),
+        "expires_in": session.remaining_seconds,
+        "capabilities": list(session.capabilities),
+    }
+
+
+def _admin_pairing_for_action(
+    request: web.Request,
+) -> tuple[PairingSession | None, web.Response | None]:
+    """Resolve one pending request and return a precise lifecycle error."""
+    session_id = request.match_info.get("session_id", "")
+    if not _PAIRING_SESSION_ID_RE.fullmatch(session_id):
+        return None, _error("invalid_session_id", 400)
+    session = _pairing(request.app["hass"]).get_by_session_id(session_id)
+    if session is None:
+        return None, _error("pairing_not_found", 404)
+    status = session.refresh_status()
+    if status != PairingStatus.WAITING:
+        return None, _error(
+            "pairing_not_pending",
+            409,
+            pairing_status=status.value,
+        )
+    return session, None
 
 
 async def _client_id(request: web.Request) -> str | None:
@@ -585,6 +627,89 @@ def _admin_snapshot(hass) -> dict[str, Any]:
     }
 
 
+class V2AdminPairingRequestsView(HomeAssistantView):
+    """List pairing requests that are still awaiting an administrator."""
+
+    url = "/api/couchmate_dev/v2/admin/pairing-requests"
+    name = "api:couchmate_dev:v2:admin:pairing_requests"
+    requires_auth = True
+
+    async def get(self, request):
+        denied = _require_admin(request)
+        if denied is not None:
+            return _no_store(denied)
+        requests = [
+            _admin_pairing_payload(session)
+            for session in _pairing(request.app["hass"]).list_pending_sessions()
+        ]
+        return web.json_response(
+            {"pairing_requests": requests, "count": len(requests)},
+            headers={"Cache-Control": "no-store"},
+        )
+
+
+class V2AdminPairingApproveView(HomeAssistantView):
+    """Approve exactly one still-pending pairing request."""
+
+    url = "/api/couchmate_dev/v2/admin/pairing-requests/{session_id}/approve"
+    name = "api:couchmate_dev:v2:admin:pairing_request:approve"
+    requires_auth = True
+
+    async def post(self, request):
+        denied = _require_admin(request)
+        if denied is not None:
+            return _no_store(denied)
+        session, error = _admin_pairing_for_action(request)
+        if error is not None:
+            return _no_store(error)
+        if session is None:
+            return _no_store(_error("pairing_not_found", 404))
+        approved = _pairing(request.app["hass"]).approve(session.code)
+        if approved is None or approved.status != PairingStatus.APPROVED:
+            return _no_store(_error("pairing_not_pending", 409))
+        persistent_notification.async_dismiss(
+            request.app["hass"], f"{DOMAIN}_pairing_{approved.session_id}"
+        )
+        return web.json_response(
+            {
+                "success": True,
+                "pairing_request": _admin_pairing_payload(approved),
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
+
+class V2AdminPairingRejectView(HomeAssistantView):
+    """Reject exactly one still-pending pairing request."""
+
+    url = "/api/couchmate_dev/v2/admin/pairing-requests/{session_id}/reject"
+    name = "api:couchmate_dev:v2:admin:pairing_request:reject"
+    requires_auth = True
+
+    async def post(self, request):
+        denied = _require_admin(request)
+        if denied is not None:
+            return _no_store(denied)
+        session, error = _admin_pairing_for_action(request)
+        if error is not None:
+            return _no_store(error)
+        if session is None:
+            return _no_store(_error("pairing_not_found", 404))
+        rejected = _pairing(request.app["hass"]).cancel(session.session_id)
+        if rejected is None or rejected.status != PairingStatus.CANCELLED:
+            return _no_store(_error("pairing_not_pending", 409))
+        persistent_notification.async_dismiss(
+            request.app["hass"], f"{DOMAIN}_pairing_{rejected.session_id}"
+        )
+        return web.json_response(
+            {
+                "success": True,
+                "pairing_request": _admin_pairing_payload(rejected),
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
+
 class V2AdminConfigurationView(HomeAssistantView):
     url = "/api/couchmate_dev/v2/admin/configuration"
     name = "api:couchmate_dev:v2:admin:configuration"
@@ -775,6 +900,9 @@ async def async_setup_configuration_api(hass) -> None:
         V2ClientSettingsView(),
         V2ClientBackgroundView(),
         V2ClientBackgroundMutationView(),
+        V2AdminPairingRequestsView(),
+        V2AdminPairingApproveView(),
+        V2AdminPairingRejectView(),
         V2AdminConfigurationView(),
         V2AdminProfilesView(),
         V2AdminProfileView(),

@@ -1,6 +1,7 @@
 """Secure local pairing manager for CouchMate clients."""
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -71,6 +72,7 @@ class PairingManager:
         self._sessions: dict[str, PairingSession] = {}
         self._session_ids_by_code: dict[str, str] = {}
         self._clients: dict[str, dict[str, Any]] = {}
+        self._exchange_lock = asyncio.Lock()
         self._store = Store(
             hass,
             PAIRING_CLIENT_STORAGE_VERSION,
@@ -93,10 +95,11 @@ class PairingManager:
         session_id = secrets.token_urlsafe(32)
         code = self._generate_unique_code()
         now = datetime.now(UTC)
+        normalized_device_name = " ".join(str(device_name).split())[:120] or "Apple TV"
         session = PairingSession(
             session_id=session_id,
             code=code,
-            device_name=device_name.strip() or "Apple TV",
+            device_name=normalized_device_name,
             created_at=now,
             expires_at=now + timedelta(seconds=PAIRING_SESSION_LIFETIME_SECONDS),
             capabilities=tuple(
@@ -143,25 +146,30 @@ class PairingManager:
         return session
 
     async def async_exchange(self, session_id: str, exchange_token: str) -> dict[str, str] | None:
-        session = self.get_by_session_id(session_id)
-        if not session or session.refresh_status() != PairingStatus.APPROVED:
-            return None
-        if not session.exchange_token or not hmac.compare_digest(session.exchange_token, exchange_token):
-            return None
+        async with self._exchange_lock:
+            session = self.get_by_session_id(session_id)
+            if not session or session.refresh_status() != PairingStatus.APPROVED:
+                return None
+            if not session.exchange_token or not hmac.compare_digest(session.exchange_token, exchange_token):
+                return None
 
-        client_id = secrets.token_urlsafe(18)
-        access_token = secrets.token_urlsafe(48)
-        self._clients[client_id] = {
-            "device_name": session.device_name,
-            "token_hash": self._hash_token(access_token),
-            "created_at": datetime.now(UTC).isoformat(),
-            "last_seen": None,
-            "capabilities": list(session.capabilities),
-        }
-        await self._async_save_clients()
-        session.status = PairingStatus.EXCHANGED
-        session.exchange_token = None
-        return {"client_id": client_id, "access_token": access_token}
+            client_id = secrets.token_urlsafe(18)
+            access_token = secrets.token_urlsafe(48)
+            self._clients[client_id] = {
+                "device_name": session.device_name,
+                "token_hash": self._hash_token(access_token),
+                "created_at": datetime.now(UTC).isoformat(),
+                "last_seen": None,
+                "capabilities": list(session.capabilities),
+            }
+            try:
+                await self._async_save_clients()
+            except Exception:
+                self._clients.pop(client_id, None)
+                raise
+            session.status = PairingStatus.EXCHANGED
+            session.exchange_token = None
+            return {"client_id": client_id, "access_token": access_token}
 
     async def async_validate_client_token(self, token: str) -> str | None:
         token_hash = self._hash_token(token)
