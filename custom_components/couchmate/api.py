@@ -11,7 +11,10 @@ from aiohttp import web
 import voluptuous as vol
 
 from homeassistant.components import persistent_notification
-from homeassistant.components.camera import async_get_image as async_get_camera_image
+from homeassistant.components.camera import (
+    async_get_image as async_get_camera_image,
+    async_request_stream,
+)
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.image import async_get_image as async_get_image_entity
 from homeassistant.core import HomeAssistant
@@ -206,7 +209,7 @@ class CouchMateInfoView(HomeAssistantView):
         hass = request.app["hass"]
         return web.json_response({
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.4.0-beta.4",
+            "version": "1.4.0-beta.5",
             "domain": DOMAIN,
             "filtered_entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
             "pairing": True,
@@ -350,7 +353,7 @@ class CouchMateClientInfoView(HomeAssistantView):
         return web.json_response({
             "client_id": client_id,
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.4.0-beta.4",
+            "version": "1.4.0-beta.5",
             "status": "active",
             "entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
         })
@@ -552,6 +555,54 @@ class CouchMateClientSnapshotView(HomeAssistantView):
         )
 
 
+class CouchMateClientStreamView(HomeAssistantView):
+    """Start one selected camera's tokenized Home Assistant HLS stream."""
+
+    url = "/api/couchmate/client/stream/{entity_id}"
+    name = "api:couchmate:client:stream"
+    requires_auth = False
+
+    async def post(self, request: web.Request, entity_id: str) -> web.Response:
+        client_id = await _client_id_from_request(request)
+        if client_id is None:
+            return web.json_response({"error": "unauthorized"}, status=401)
+
+        hass = request.app["hass"]
+        if not entity_id.startswith("camera."):
+            return web.json_response({"error": "invalid_camera"}, status=400)
+        if entity_id not in set(_effective_client_entity_ids(hass)):
+            return web.json_response({"error": "entity_not_selected"}, status=403)
+        if hass.states.get(entity_id) is None:
+            return web.json_response({"error": "entity_not_found"}, status=404)
+
+        try:
+            stream_url = await async_request_stream(hass, entity_id, "hls")
+        except (HomeAssistantError, TimeoutError, ValueError, KeyError) as err:
+            _LOGGER.warning(
+                "Unable to start camera stream %s for CouchMate client %s: %s",
+                entity_id,
+                client_id,
+                err,
+            )
+            return web.json_response(
+                {"error": "stream_unavailable"},
+                status=422,
+                headers={"Cache-Control": "no-store"},
+            )
+
+        return web.json_response(
+            {
+                "entity_id": entity_id,
+                "url": stream_url,
+                "content_type": "application/vnd.apple.mpegurl",
+            },
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+            },
+        )
+
+
 _ALLOWED_SERVICES: dict[str, set[str]] = {
     "light": {"turn_on", "turn_off", "toggle"},
     "switch": {"turn_on", "turn_off", "toggle"},
@@ -647,6 +698,7 @@ async def async_setup_api(hass: HomeAssistant) -> None:
         CouchMateClientInfoView(),
         CouchMateClientEntitiesView(),
         CouchMateClientSnapshotView(),
+        CouchMateClientStreamView(),
         CouchMateClientServiceView(),
     ):
         hass.http.register_view(view)
