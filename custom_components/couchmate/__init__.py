@@ -54,10 +54,9 @@ def _resolve_filter(
     every entity registered to that device is included. Explicit
     entity ids are added as-is. Result is unioned and deduplicated.
 
-    The set is rebuilt at setup time and on options-flow save. If a
-    user later assigns a *new* entity to an already-picked area, the
-    integration needs a reload (or restart) to see it — same trade-off
-    most HA filtering integrations make.
+    Callers may rebuild the set whenever Home Assistant's registries change.
+    The client API does this for every snapshot so newly added rooms, devices
+    and entities appear without reloading the integration.
     """
     if not (areas or devices or entities):
         return set()

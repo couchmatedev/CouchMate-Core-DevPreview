@@ -97,11 +97,28 @@ def _entity_payload(hass: HomeAssistant, entity_id: str) -> dict[str, Any] | Non
 def _effective_client_entity_ids(hass: HomeAssistant) -> list[str]:
     """Return the entities exposed to and controllable by a CouchMate client."""
     domain_data = hass.data.get(DOMAIN, {})
-    selected = list(domain_data.get("entities", []))
+    configured_area_ids = list(domain_data.get("areas", []))
     full_device_ids = set(domain_data.get("devices", []))
+    explicit_entity_ids = list(domain_data.get("explicit_entities", []))
+    excluded_entity_ids = list(domain_data.get("excluded_entities", []))
     room_temperature_ids = dict(domain_data.get("room_temperatures", {}))
     room_humidity_ids = dict(domain_data.get("room_humidities", {}))
     selection_model = dict(domain_data.get("selection_model", {}))
+
+    # Resolve registry-backed selections for every client snapshot instead of
+    # relying on the flattened list created when Core started or the selection
+    # was saved. Home Assistant can add an entity to a selected device or add a
+    # device to a legacy selected area at any time; polling clients must see
+    # those changes without a Core reload.
+    from . import _resolve_filter
+
+    selected = sorted(_resolve_filter(
+        hass,
+        areas=configured_area_ids,
+        devices=list(full_device_ids),
+        entities=explicit_entity_ids,
+        excluded_entities=excluded_entity_ids,
+    ))
 
     entity_registry = er.async_get(hass)
     device_registry = dr.async_get(hass)
@@ -112,7 +129,7 @@ def _effective_client_entity_ids(hass: HomeAssistant) -> list[str]:
         and hass.states.get(entry.entity_id) is not None
     ]
 
-    configured_area_ids = {
+    selection_model_area_ids = {
         str(area_id)
         for area_id in dict(selection_model.get("areas", {})).keys()
         if area_id
@@ -125,7 +142,7 @@ def _effective_client_entity_ids(hass: HomeAssistant) -> list[str]:
             continue
         device = device_registry.async_get(entry.device_id) if entry.device_id else None
         entity_area_id = entry.area_id or (device.area_id if device else None)
-        if entity_area_id and entity_area_id in configured_area_ids:
+        if entity_area_id and entity_area_id in selection_model_area_ids:
             configured_media_entity_ids.append(entry.entity_id)
 
     return list(dict.fromkeys([
@@ -186,7 +203,7 @@ class CouchMateInfoView(HomeAssistantView):
         hass = request.app["hass"]
         return web.json_response({
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.4.0-beta.2",
+            "version": "1.4.0-beta.3",
             "domain": DOMAIN,
             "filtered_entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
             "pairing": True,
@@ -330,7 +347,7 @@ class CouchMateClientInfoView(HomeAssistantView):
         return web.json_response({
             "client_id": client_id,
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.4.0-beta.2",
+            "version": "1.4.0-beta.3",
             "status": "active",
             "entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
         })
