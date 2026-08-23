@@ -14,7 +14,7 @@ class SelectionSensor(SensorEntity):
         self._attr_name={"areas":"Ausgewählte Bereiche","devices":"Ausgewählte Geräte","explicit_entities":"Einzeln ausgewählte Entitäten","excluded_entities":"Ausgeschlossene Entitäten","entities":"Freigegebene Entitäten gesamt"}[key]
         self._attr_unique_id=f"{entry.entry_id}_{key}_count"
         self._attr_icon={"areas":"mdi:floor-plan","devices":"mdi:devices","explicit_entities":"mdi:format-list-checks","excluded_entities":"mdi:playlist-remove","entities":"mdi:television-guide"}[key]
-        self._attr_device_info=DeviceInfo(identifiers={(DOMAIN,entry.entry_id)},name="CouchMate Core Dev Preview",manufacturer="CouchMate",model="Home Assistant entity bridge",sw_version="1.4.0-beta.3")
+        self._attr_device_info=DeviceInfo(identifiers={(DOMAIN,entry.entry_id)},name="CouchMate Core Dev Preview",manufacturer="CouchMate",model="Home Assistant entity bridge",sw_version="1.4.0-beta.4")
     @property
     def native_value(self): return len(self.hass.data.get(DOMAIN,{}).get(self._key,[]))
     @property

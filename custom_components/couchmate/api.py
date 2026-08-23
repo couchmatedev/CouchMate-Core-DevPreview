@@ -11,8 +11,11 @@ from aiohttp import web
 import voluptuous as vol
 
 from homeassistant.components import persistent_notification
+from homeassistant.components.camera import async_get_image as async_get_camera_image
 from homeassistant.components.http import HomeAssistantView
+from homeassistant.components.image import async_get_image as async_get_image_entity
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -203,7 +206,7 @@ class CouchMateInfoView(HomeAssistantView):
         hass = request.app["hass"]
         return web.json_response({
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.4.0-beta.3",
+            "version": "1.4.0-beta.4",
             "domain": DOMAIN,
             "filtered_entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
             "pairing": True,
@@ -347,7 +350,7 @@ class CouchMateClientInfoView(HomeAssistantView):
         return web.json_response({
             "client_id": client_id,
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.4.0-beta.3",
+            "version": "1.4.0-beta.4",
             "status": "active",
             "entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
         })
@@ -378,6 +381,12 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                 if payload is None:
                     skipped.append(entity_id)
                     continue
+                if entity_id.startswith(("camera.", "image.")):
+                    # The paired-client boundary has its own snapshot proxy.
+                    # Never leak Home Assistant's rotating image access token
+                    # or a signed entity_picture URL into client state/logs.
+                    payload["attributes"].pop("access_token", None)
+                    payload["attributes"].pop("entity_picture", None)
                 entities.append(payload)
             except Exception as err:  # noqa: BLE001
                 _LOGGER.exception("Unable to serialize CouchMate client entity %s", entity_id)
@@ -484,6 +493,65 @@ class CouchMateClientEntitiesView(HomeAssistantView):
         )
 
 
+class CouchMateClientSnapshotView(HomeAssistantView):
+    """Serve one selected Home Assistant camera/image to a paired client."""
+
+    url = "/api/couchmate/client/snapshot/{entity_id}"
+    name = "api:couchmate:client:snapshot"
+    requires_auth = False
+
+    async def get(self, request: web.Request, entity_id: str) -> web.Response:
+        client_id = await _client_id_from_request(request)
+        if client_id is None:
+            return web.json_response({"error": "unauthorized"}, status=401)
+
+        hass = request.app["hass"]
+        entity_domain = entity_id.split(".", 1)[0]
+        if entity_domain not in {"camera", "image"}:
+            return web.json_response({"error": "invalid_image_entity"}, status=400)
+        if entity_id not in set(_effective_client_entity_ids(hass)):
+            return web.json_response({"error": "entity_not_selected"}, status=403)
+        if hass.states.get(entity_id) is None:
+            return web.json_response({"error": "entity_not_found"}, status=404)
+
+        try:
+            if entity_domain == "camera":
+                image = await async_get_camera_image(
+                    hass,
+                    entity_id,
+                    timeout=10,
+                    width=1280,
+                    height=720,
+                )
+            else:
+                image = await async_get_image_entity(
+                    hass,
+                    entity_id,
+                    timeout=10,
+                )
+        except (HomeAssistantError, TimeoutError, ValueError, KeyError) as err:
+            _LOGGER.warning(
+                "Unable to load camera snapshot %s for CouchMate client %s: %s",
+                entity_id,
+                client_id,
+                err,
+            )
+            return web.json_response(
+                {"error": "snapshot_unavailable"},
+                status=502,
+                headers={"Cache-Control": "no-store"},
+            )
+
+        return web.Response(
+            body=image.content,
+            content_type=image.content_type,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+            },
+        )
+
+
 _ALLOWED_SERVICES: dict[str, set[str]] = {
     "light": {"turn_on", "turn_off", "toggle"},
     "switch": {"turn_on", "turn_off", "toggle"},
@@ -578,6 +646,7 @@ async def async_setup_api(hass: HomeAssistant) -> None:
         PairingCancelView(),
         CouchMateClientInfoView(),
         CouchMateClientEntitiesView(),
+        CouchMateClientSnapshotView(),
         CouchMateClientServiceView(),
     ):
         hass.http.register_view(view)
