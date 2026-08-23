@@ -267,7 +267,7 @@ def check_http_views() -> None:
             views[node.name] = (url, name, relative(path))
             view_nodes[node.name] = node
 
-    require(len(views) == 29, f"expected 29 HTTP views, found {len(views)}")
+    require(len(views) == 30, f"expected 30 HTTP views, found {len(views)}")
     urls = [item[0] for item in views.values()]
     names = [item[1] for item in views.values()]
     duplicate_urls = sorted(value for value, count in Counter(urls).items() if count > 1)
@@ -382,7 +382,7 @@ def main() -> int:
         return 1
     print(
         "release validation: PASS "
-        f"({EXPECTED_BRAND}, {EXPECTED_VERSION}, 29 unique HTTP views)"
+        f"({EXPECTED_BRAND}, {EXPECTED_VERSION}, 30 unique HTTP views)"
     )
     return 0
 

@@ -213,10 +213,14 @@ class PairingManager:
         return capability in set(data.get("capabilities", []))
 
     async def async_revoke_client(self, client_id: str) -> bool:
-        removed = self._clients.pop(client_id, None) is not None
-        if removed:
-            await self._async_save_clients()
-        return removed
+        client = self._clients.pop(client_id, None)
+        if client is not None:
+            try:
+                await self._async_save_clients()
+            except Exception:
+                self._clients[client_id] = client
+                raise
+        return client is not None
 
     def cleanup(self) -> None:
         expired = [sid for sid, session in self._sessions.items() if session.refresh_status() == PairingStatus.EXPIRED]

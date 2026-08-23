@@ -813,6 +813,30 @@ class V2AdminClientProfileView(HomeAssistantView):
             return _operation_error(err)
 
 
+class V2AdminClientView(HomeAssistantView):
+    """Revoke one paired Apple TV or Companion App."""
+
+    url = "/api/couchmate/v2/admin/clients/{client_id}"
+    name = "api:couchmate:v2:admin:client"
+    requires_auth = True
+
+    async def delete(self, request, client_id: str):
+        denied = _require_admin(request)
+        if denied is not None:
+            return denied
+        hass = request.app["hass"]
+        client = _pairing(hass).client_info(client_id)
+        if client is None:
+            return _error("not_found", 404)
+        try:
+            if not await _pairing(hass).async_revoke_client(client_id):
+                return _error("not_found", 404)
+            await _configuration(hass).async_remove_client_assignment(client_id)
+            return web.json_response({"success": True, "client": client})
+        except Exception as err:  # noqa: BLE001
+            return _operation_error(err)
+
+
 class V2AdminHomeBackgroundView(HomeAssistantView):
     """Manage the private background inherited by rooms without an override."""
 
@@ -905,6 +929,7 @@ async def async_setup_configuration_api(hass) -> None:
         V2AdminConfigurationView(),
         V2AdminProfilesView(),
         V2AdminProfileView(),
+        V2AdminClientView(),
         V2AdminClientProfileView(),
         V2AdminHomeBackgroundView(),
         V2AdminBackgroundView(),
