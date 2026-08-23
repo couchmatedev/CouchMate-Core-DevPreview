@@ -1,4 +1,4 @@
-"""Additive CouchMate2 configuration and private-background API."""
+"""Additive CouchMate configuration and private-background API."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -134,7 +134,7 @@ def _operation_error(error: Exception) -> web.Response:
         if "jpeg" in lowered or "png" in lowered or "content type" in lowered:
             return _error("unsupported_image", 415, text)
         return _error("invalid_image", 422, text)
-    _LOGGER.exception("Unexpected CouchMate2 configuration API error")
+    _LOGGER.exception("Unexpected CouchMate configuration API error")
     return _error("internal_error", 500)
 
 
@@ -147,6 +147,7 @@ def _allowed_area_ids(hass) -> set[str]:
     allowed.update(str(area_id) for area_id in runtime.get("areas", []) if area_id)
     allowed.update(map(str, runtime.get("room_temperatures", {})))
     allowed.update(map(str, runtime.get("room_humidities", {})))
+    allowed.update(map(str, runtime.get("room_climates", {})))
     entity_registry = er.async_get(hass)
     device_registry = dr.async_get(hass)
     for entity_id in runtime.get("entities", []):
@@ -278,18 +279,19 @@ def _client_response(request: web.Request, client_id: str) -> web.Response:
     profile = effective["profile"]
     allowed_area_ids = _allowed_area_ids(hass)
     authorization_scope = "\0".join(sorted(allowed_area_ids))
+    client = _pairing(hass).client_info(client_id) or {"client_id": client_id}
+    client_device_name = str(client.get("device_name", "Apple TV"))
     etag_value = hashlib.sha256(
         (
             f"v{_CLIENT_REPRESENTATION_VERSION}:"
             f"{document['revision']}:{profile['id']}:{profile['revision']}:"
-            f"{authorization_scope}"
+            f"{authorization_scope}:{client_device_name}"
         ).encode()
     ).hexdigest()
     etag = f'"{etag_value}"'
     headers = {"ETag": etag, "Cache-Control": "private, no-cache", "Vary": "Authorization"}
     if _etag_matches(request.headers.get("If-None-Match"), etag):
         return web.Response(status=304, headers=headers)
-    client = _pairing(hass).client_info(client_id) or {"client_id": client_id}
     return web.json_response({
         "schema_version": document["schema_version"],
         "revision": document["revision"],
@@ -814,11 +816,29 @@ class V2AdminClientProfileView(HomeAssistantView):
 
 
 class V2AdminClientView(HomeAssistantView):
-    """Revoke one paired Apple TV or Companion App."""
+    """Rename or revoke one paired Apple TV or Companion App."""
 
     url = "/api/couchmate/v2/admin/clients/{client_id}"
     name = "api:couchmate:v2:admin:client"
     requires_auth = True
+
+    async def patch(self, request, client_id: str):
+        denied = _require_admin(request)
+        if denied is not None:
+            return denied
+        try:
+            body = await _json_body(request)
+            client = await _pairing(request.app["hass"]).async_rename_client(
+                client_id,
+                body.get("device_name", ""),
+            )
+            if client is None:
+                return _error("not_found", 404)
+            return web.json_response({"success": True, "client": client})
+        except ValueError:
+            return _error("device_name_required", 400)
+        except Exception as err:  # noqa: BLE001
+            return _operation_error(err)
 
     async def delete(self, request, client_id: str):
         denied = _require_admin(request)

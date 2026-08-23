@@ -464,7 +464,7 @@ class ConfigurationManager:
             self._initialized = True
 
     async def async_remove(self) -> None:
-        """Remove all CouchMate2 settings with the integration."""
+        """Remove all CouchMate settings with the integration."""
         async with self._lock:
             await self._store.async_remove()
             self._data = _default_document()

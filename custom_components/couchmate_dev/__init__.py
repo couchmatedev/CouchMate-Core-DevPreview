@@ -120,7 +120,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await pairing_manager.async_initialize()
         hass.data[DOMAIN][PAIRING_MANAGER] = pairing_manager
 
-        # CouchMate2 settings are isolated from the established selection and
+        # Versioned CouchMate settings are isolated from the established selection and
         # pairing stores. Existing CouchMate clients never read or mutate this
         # manager and therefore retain their current behaviour.
         configuration_manager = ConfigurationManager(hass)
@@ -217,13 +217,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.exception("Error setting up REST API")
             return False
 
-        # The versioned CouchMate2 API is additive. A failure in the optional
+        # The versioned CouchMate API is additive. A failure in the optional
         # extension is logged but must never take the released CouchMate API
         # offline.
         try:
             await async_setup_configuration_api(hass)
         except Exception:
-            _LOGGER.exception("Error setting up CouchMate2 configuration API")
+            _LOGGER.exception("Error setting up CouchMate configuration API")
 
         # Set up graphical configurator
         try:
@@ -235,7 +235,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         try:
             await async_setup_management(hass)
         except Exception:
-            _LOGGER.exception("Error setting up CouchMate2 management page")
+            _LOGGER.exception("Error setting up CouchMate management page")
 
         # Expose the graphical configurator as a native Home Assistant
         # sidebar entry. The iframe uses a relative URL, so it works with
@@ -327,7 +327,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     except Exception:
         _LOGGER.exception("Error removing CouchMate Core Dev Preview storage")
 
-    # Privacy-sensitive CouchMate2 settings and image derivatives use their
+    # Privacy-sensitive CouchMate settings and image derivatives use their
     # own stores. Remove them independently so a failure cannot prevent the
     # established integration removal path.
     configuration_manager = hass.data.get(DOMAIN, {}).get(CONFIGURATION_MANAGER)
@@ -335,7 +335,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         configuration_manager = configuration_manager or ConfigurationManager(hass)
         await configuration_manager.async_remove()
     except Exception:
-        _LOGGER.exception("Error removing CouchMate2 configuration storage")
+        _LOGGER.exception("Error removing CouchMate configuration storage")
 
     try:
         background_manager = hass.data.get(DOMAIN, {}).get(BACKGROUND_MANAGER)

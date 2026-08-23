@@ -1,4 +1,4 @@
-"""Additive CouchMate2 configuration and private-background API."""
+"""Additive CouchMate configuration and private-background API."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -134,7 +134,7 @@ def _operation_error(error: Exception) -> web.Response:
         if "jpeg" in lowered or "png" in lowered or "content type" in lowered:
             return _error("unsupported_image", 415, text)
         return _error("invalid_image", 422, text)
-    _LOGGER.exception("Unexpected CouchMate2 configuration API error")
+    _LOGGER.exception("Unexpected CouchMate configuration API error")
     return _error("internal_error", 500)
 
 

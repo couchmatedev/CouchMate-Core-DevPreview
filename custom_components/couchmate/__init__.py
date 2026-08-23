@@ -24,6 +24,8 @@ from .const import (
     CONF_EXCLUDED_ENTITIES,
     CONF_ROOM_TEMPERATURES,
     CONF_ROOM_HUMIDITIES,
+    CONF_ROOM_CLIMATES,
+    CONF_WEATHER_ENTITY,
     CONF_SELECTION_MODEL,
     SELECTION_MODEL_VERSION,
     DOMAIN,
@@ -119,7 +121,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await pairing_manager.async_initialize()
         hass.data[DOMAIN][PAIRING_MANAGER] = pairing_manager
 
-        # CouchMate2 settings are isolated from the established selection and
+        # Versioned CouchMate settings are isolated from the established selection and
         # pairing stores. Existing CouchMate clients never read or mutate this
         # manager and therefore retain their current behaviour.
         configuration_manager = ConfigurationManager(hass)
@@ -144,6 +146,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             stored_excluded_entities = list(stored.get(CONF_EXCLUDED_ENTITIES, []))
             stored_room_temperatures = dict(stored.get(CONF_ROOM_TEMPERATURES, {}))
             stored_room_humidities = dict(stored.get(CONF_ROOM_HUMIDITIES, {}))
+            stored_room_climates = dict(stored.get(CONF_ROOM_CLIMATES, {}))
+            stored_weather_entity = stored.get(CONF_WEATHER_ENTITY)
             stored_selection_model = dict(stored.get(CONF_SELECTION_MODEL, {}))
             if stored_selection_model.get("version") == SELECTION_MODEL_VERSION:
                 model_areas = dict(stored_selection_model.get("areas", {}))
@@ -152,6 +156,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 stored_entities = []
                 stored_room_temperatures = {}
                 stored_room_humidities = {}
+                stored_room_climates = {}
+                stored_weather_entity = stored_selection_model.get("weather")
                 for area_id, area_cfg in model_areas.items():
                     if not isinstance(area_cfg, dict):
                         continue
@@ -159,6 +165,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         stored_room_temperatures[str(area_id)] = str(area_cfg["temperature"])
                     if area_cfg.get("humidity"):
                         stored_room_humidities[str(area_id)] = str(area_cfg["humidity"])
+                    if area_cfg.get("climate"):
+                        stored_room_climates[str(area_id)] = str(area_cfg["climate"])
                     for device_id, device_cfg in dict(area_cfg.get("devices", {})).items():
                         if not isinstance(device_cfg, dict):
                             continue
@@ -176,6 +184,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             stored_excluded_entities = list(entry.data.get(CONF_EXCLUDED_ENTITIES, []))
             stored_room_temperatures = dict(entry.data.get(CONF_ROOM_TEMPERATURES, {}))
             stored_room_humidities = dict(entry.data.get(CONF_ROOM_HUMIDITIES, {}))
+            stored_room_climates = dict(entry.data.get(CONF_ROOM_CLIMATES, {}))
+            stored_weather_entity = entry.data.get(CONF_WEATHER_ENTITY)
             stored_selection_model = dict(entry.data.get(CONF_SELECTION_MODEL, {}))
 
         # Resolve area + device picks down to a flat entity-id set,
@@ -197,6 +207,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN]["excluded_entities"] = stored_excluded_entities
         hass.data[DOMAIN]["room_temperatures"] = stored_room_temperatures
         hass.data[DOMAIN]["room_humidities"] = stored_room_humidities
+        hass.data[DOMAIN]["room_climates"] = stored_room_climates
+        hass.data[DOMAIN]["weather_entity"] = stored_weather_entity
         hass.data[DOMAIN]["selection_model"] = stored_selection_model if stored_selection_model.get("version") == SELECTION_MODEL_VERSION else {"version": SELECTION_MODEL_VERSION, "areas": {}}
         hass.data[DOMAIN]["entry"] = entry
 
@@ -216,13 +228,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.exception("Error setting up REST API")
             return False
 
-        # The versioned CouchMate2 API is additive. A failure in the optional
+        # The versioned CouchMate API is additive. A failure in the optional
         # extension is logged but must never take the released CouchMate API
         # offline.
         try:
             await async_setup_configuration_api(hass)
         except Exception:
-            _LOGGER.exception("Error setting up CouchMate2 configuration API")
+            _LOGGER.exception("Error setting up CouchMate configuration API")
 
         # Set up graphical configurator
         try:
@@ -234,7 +246,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         try:
             await async_setup_management(hass)
         except Exception:
-            _LOGGER.exception("Error setting up CouchMate2 management page")
+            _LOGGER.exception("Error setting up CouchMate management page")
 
         # Expose the graphical configurator as a native Home Assistant
         # sidebar entry. The iframe uses a relative URL, so it works with
@@ -326,7 +338,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     except Exception:
         _LOGGER.exception("Error removing CouchMate Core Dev Preview storage")
 
-    # Privacy-sensitive CouchMate2 settings and image derivatives use their
+    # Privacy-sensitive CouchMate settings and image derivatives use their
     # own stores. Remove them independently so a failure cannot prevent the
     # established integration removal path.
     configuration_manager = hass.data.get(DOMAIN, {}).get(CONFIGURATION_MANAGER)
@@ -334,7 +346,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         configuration_manager = configuration_manager or ConfigurationManager(hass)
         await configuration_manager.async_remove()
     except Exception:
-        _LOGGER.exception("Error removing CouchMate2 configuration storage")
+        _LOGGER.exception("Error removing CouchMate configuration storage")
 
     try:
         background_manager = hass.data.get(DOMAIN, {}).get(BACKGROUND_MANAGER)

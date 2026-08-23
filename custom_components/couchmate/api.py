@@ -109,6 +109,8 @@ def _effective_client_entity_ids(hass: HomeAssistant) -> list[str]:
     excluded_entity_ids = list(domain_data.get("excluded_entities", []))
     room_temperature_ids = dict(domain_data.get("room_temperatures", {}))
     room_humidity_ids = dict(domain_data.get("room_humidities", {}))
+    room_climate_ids = dict(domain_data.get("room_climates", {}))
+    weather_entity_id = domain_data.get("weather_entity")
     selection_model = dict(domain_data.get("selection_model", {}))
 
     # Resolve registry-backed selections for every client snapshot instead of
@@ -157,7 +159,47 @@ def _effective_client_entity_ids(hass: HomeAssistant) -> list[str]:
         *configured_media_entity_ids,
         *room_temperature_ids.values(),
         *room_humidity_ids.values(),
+        *room_climate_ids.values(),
+        *([weather_entity_id] if weather_entity_id else []),
     ]))
+
+
+def _resolved_room_climate_ids(
+    hass: HomeAssistant,
+    effective_entity_ids: list[str],
+) -> dict[str, str]:
+    """Resolve one controllable thermostat per room without guessing.
+
+    An explicitly configured climate source always wins.  Otherwise a room
+    receives a fallback only when exactly one exposed, available climate
+    entity belongs to it.
+    """
+    configured = {
+        str(area_id): str(entity_id)
+        for area_id, entity_id in dict(
+            hass.data.get(DOMAIN, {}).get("room_climates", {})
+        ).items()
+        if area_id and entity_id and hass.states.get(str(entity_id)) is not None
+    }
+    candidates: dict[str, list[str]] = {}
+
+    for entity_id in effective_entity_ids:
+        if not entity_id.startswith("climate."):
+            continue
+        state = hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable"):
+            continue
+        payload = _entity_payload(hass, entity_id)
+        area_id = payload.get("area_id") if payload else None
+        if area_id:
+            candidates.setdefault(str(area_id), []).append(entity_id)
+
+    for area_id, entity_ids in candidates.items():
+        unique_ids = list(dict.fromkeys(entity_ids))
+        if area_id not in configured and len(unique_ids) == 1:
+            configured[area_id] = unique_ids[0]
+
+    return configured
 
 
 class CouchMateEntitiesView(HomeAssistantView):
@@ -374,7 +416,14 @@ class CouchMateClientEntitiesView(HomeAssistantView):
         full_device_ids = list(hass.data.get(DOMAIN, {}).get("devices", []))
         room_temperature_ids = dict(hass.data.get(DOMAIN, {}).get("room_temperatures", {}))
         room_humidity_ids = dict(hass.data.get(DOMAIN, {}).get("room_humidities", {}))
+        selection_model = dict(hass.data.get(DOMAIN, {}).get("selection_model", {}))
+        hero_entity_order = {
+            str(area_id): [str(entity_id) for entity_id in area_cfg.get("hero_order", [])]
+            for area_id, area_cfg in dict(selection_model.get("areas", {})).items()
+            if isinstance(area_cfg, dict) and isinstance(area_cfg.get("hero_order"), list)
+        }
         effective_selected = _effective_client_entity_ids(hass)
+        room_climate_ids = _resolved_room_climate_ids(hass, effective_selected)
         entities: list[dict[str, Any]] = []
         skipped: list[str] = []
 
@@ -422,6 +471,30 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                 "name": payload.get("name"),
             }
 
+        # A room thermostat is the fallback climate source for each value that
+        # has no dedicated sensor selection. The thermostat itself remains in
+        # the entity list so the client can render it as a real control.
+        for area_id, entity_id in room_climate_ids.items():
+            if area_id in room_temperatures:
+                continue
+            payload = entities_by_id.get(entity_id)
+            current_temperature = (
+                payload.get("attributes", {}).get("current_temperature")
+                if payload is not None
+                else None
+            )
+            if payload is None or current_temperature is None:
+                continue
+            room_temperatures[area_id] = {
+                "area_id": area_id,
+                "area_name": payload.get("area_name"),
+                "entity_id": entity_id,
+                "state": str(current_temperature),
+                "unit_of_measurement": payload.get("attributes", {}).get("temperature_unit")
+                    or hass.config.units.temperature_unit,
+                "name": payload.get("name"),
+            }
+
         room_humidities: dict[str, dict[str, Any]] = {}
         for area_id, entity_id in room_humidity_ids.items():
             payload = entities_by_id.get(entity_id)
@@ -437,8 +510,30 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                 "name": payload.get("name"),
             }
 
+        for area_id, entity_id in room_climate_ids.items():
+            if area_id in room_humidities:
+                continue
+            payload = entities_by_id.get(entity_id)
+            attributes = payload.get("attributes", {}) if payload is not None else {}
+            current_humidity = attributes.get("current_humidity", attributes.get("humidity"))
+            if payload is None or current_humidity is None:
+                continue
+            room_humidities[area_id] = {
+                "area_id": area_id,
+                "area_name": payload.get("area_name"),
+                "entity_id": entity_id,
+                "state": str(current_humidity),
+                "unit_of_measurement": "%",
+                "name": payload.get("name"),
+            }
+
         weather: dict[str, Any] | None = None
-        weather_entity_ids = [entity_id for entity_id in selected if entity_id.startswith("weather.")]
+        configured_weather_entity = hass.data.get(DOMAIN, {}).get("weather_entity")
+        weather_entity_ids = (
+            [str(configured_weather_entity)]
+            if configured_weather_entity
+            else [entity_id for entity_id in selected if entity_id.startswith("weather.")]
+        )
         if not weather_entity_ids:
             weather_entity_ids = [state.entity_id for state in hass.states.async_all("weather") if state.state not in ("unknown", "unavailable")]
 
@@ -480,6 +575,8 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                 "room_temperatures": room_temperatures,
                 "room_humidity_entity_ids": room_humidity_ids,
                 "room_humidities": room_humidities,
+                "room_climate_entity_ids": room_climate_ids,
+                "hero_entity_order": hero_entity_order,
                 # Selection model v2 metadata. Clients must use this as the
                 # authoritative whitelist: exact entity ids are rendered exactly,
                 # while sibling entities are allowed only for devices explicitly

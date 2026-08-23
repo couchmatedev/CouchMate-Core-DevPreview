@@ -208,7 +208,7 @@ class PairingManager:
         }
 
     def client_has_capability(self, client_id: str, capability: str) -> bool:
-        """Check an explicitly negotiated optional CouchMate2 capability."""
+        """Check an explicitly negotiated optional CouchMate capability."""
         data = self._clients.get(client_id, {})
         return capability in set(data.get("capabilities", []))
 

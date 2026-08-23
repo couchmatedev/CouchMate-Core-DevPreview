@@ -1,4 +1,4 @@
-"""CouchMate2 pairing, profile, and room-design management page."""
+"""CouchMate pairing, profile, and room-design management page."""
 from __future__ import annotations
 
 from aiohttp import web

@@ -26,7 +26,7 @@ PAIRING_CLIENT_STORAGE_VERSION = 1
 PAIRING_CLIENT_STORAGE_KEY = "couchmate_dev.paired_clients"
 PAIRING_MANAGER = "pairing_manager"
 
-# CouchMate2 configuration is intentionally stored separately from the
+# Versioned CouchMate configuration is intentionally stored separately from the
 # existing entity-selection and pairing stores. This keeps every v1 client
 # path byte-for-byte compatible and prevents legacy selection updates from
 # overwriting dashboard settings.

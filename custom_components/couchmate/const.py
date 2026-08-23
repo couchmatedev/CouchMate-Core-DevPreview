@@ -10,6 +10,8 @@ CONF_AREAS = "areas"
 CONF_DEVICES = "devices"
 CONF_ROOM_TEMPERATURES = "room_temperatures"
 CONF_ROOM_HUMIDITIES = "room_humidities"
+CONF_ROOM_CLIMATES = "room_climates"
+CONF_WEATHER_ENTITY = "weather_entity"
 CONF_SELECTION_MODEL = "selection_model"
 SELECTION_MODEL_VERSION = 2
 CONF_FILTER_MODE = "filter_mode"
@@ -26,7 +28,7 @@ PAIRING_CLIENT_STORAGE_VERSION = 1
 PAIRING_CLIENT_STORAGE_KEY = "couchmate.paired_clients"
 PAIRING_MANAGER = "pairing_manager"
 
-# CouchMate2 configuration is intentionally stored separately from the
+# Versioned CouchMate configuration is intentionally stored separately from the
 # existing entity-selection and pairing stores. This keeps every v1 client
 # path byte-for-byte compatible and prevents legacy selection updates from
 # overwriting dashboard settings.
