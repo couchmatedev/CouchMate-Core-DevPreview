@@ -23,7 +23,7 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN, PAIRING_MANAGER
+from .const import CONFIGURATION_MANAGER, DOMAIN, PAIRING_MANAGER
 from .pairing import PairingManager, PairingStatus
 from .storage import async_save_entities
 
@@ -32,6 +32,56 @@ _LOGGER = logging.getLogger(__name__)
 
 def _manager(hass: HomeAssistant) -> PairingManager:
     return hass.data[DOMAIN][PAIRING_MANAGER]
+
+
+def _profile_hero_configuration(
+    hass: HomeAssistant,
+    client_id: str,
+) -> tuple[dict[str, list[str]], dict[str, dict[str, str]]]:
+    """Return the normalized v1 Hero layout assigned to this client."""
+    configuration = hass.data.get(DOMAIN, {}).get(CONFIGURATION_MANAGER)
+    if configuration is None:
+        return {}, {}
+
+    profile = configuration.client_snapshot(client_id).get("profile", {})
+    settings = profile.get("settings", {})
+    companion = settings.get("companion", {}) if isinstance(settings, dict) else {}
+    if not isinstance(companion, dict):
+        return {}, {}
+
+    raw_orders = companion.get("hero_entity_order", {})
+    hero_orders = {
+        str(area_id): list(dict.fromkeys(
+            str(entity_id)
+            for entity_id in entity_ids
+            if isinstance(entity_id, str) and entity_id
+        ))[:3]
+        for area_id, entity_ids in raw_orders.items()
+        if isinstance(area_id, str) and isinstance(entity_ids, list)
+    } if isinstance(raw_orders, dict) else {}
+
+    allowed_styles = {
+        "thermostat_card_style": {"full_vertical", "full", "compact", "hidden"},
+        "device_card_style": {"bubble", "tile", "toggle", "icon"},
+        "camera_card_style": {"large", "compact"},
+        "media_card_style": {"transport", "compact"},
+    }
+    raw_layouts = companion.get("hero_layouts", {})
+    hero_layouts: dict[str, dict[str, str]] = {}
+    if isinstance(raw_layouts, dict):
+        for area_id, raw_layout in raw_layouts.items():
+            if not isinstance(area_id, str) or not isinstance(raw_layout, dict):
+                continue
+            normalized = {
+                key: value
+                for key, choices in allowed_styles.items()
+                if isinstance((value := raw_layout.get(key)), str)
+                and value in choices
+            }
+            if normalized:
+                hero_layouts[area_id] = normalized
+
+    return hero_orders, hero_layouts
 
 
 def _pairing_response(payload: Mapping[str, Any], status: int = 200) -> web.Response:
@@ -251,7 +301,7 @@ class CouchMateInfoView(HomeAssistantView):
         hass = request.app["hass"]
         return web.json_response({
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.4.0-beta.5",
+            "version": "1.4.0-beta.6",
             "domain": DOMAIN,
             "filtered_entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
             "pairing": True,
@@ -395,7 +445,7 @@ class CouchMateClientInfoView(HomeAssistantView):
         return web.json_response({
             "client_id": client_id,
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.4.0-beta.5",
+            "version": "1.4.0-beta.6",
             "status": "active",
             "entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
         })
@@ -417,11 +467,30 @@ class CouchMateClientEntitiesView(HomeAssistantView):
         room_temperature_ids = dict(hass.data.get(DOMAIN, {}).get("room_temperatures", {}))
         room_humidity_ids = dict(hass.data.get(DOMAIN, {}).get("room_humidities", {}))
         selection_model = dict(hass.data.get(DOMAIN, {}).get("selection_model", {}))
+        thermostat_card_style = selection_model.get("thermostat_card_style", "full")
+        if thermostat_card_style not in ("full_vertical", "full", "compact", "hidden"):
+            thermostat_card_style = "full"
+        show_room_name = selection_model.get("show_room_name", True)
+        if not isinstance(show_room_name, bool):
+            show_room_name = True
+        show_room_climate = selection_model.get("show_room_climate", True)
+        if not isinstance(show_room_climate, bool):
+            show_room_climate = True
+        room_thermostat_card_styles = {
+            str(area_id): str(area_cfg["thermostat_card_style"])
+            for area_id, area_cfg in dict(selection_model.get("areas", {})).items()
+            if isinstance(area_cfg, dict)
+            and area_cfg.get("thermostat_card_style")
+            in ("full_vertical", "full", "compact", "hidden")
+        }
         hero_entity_order = {
             str(area_id): [str(entity_id) for entity_id in area_cfg.get("hero_order", [])]
             for area_id, area_cfg in dict(selection_model.get("areas", {})).items()
             if isinstance(area_cfg, dict) and isinstance(area_cfg.get("hero_order"), list)
         }
+        profile_hero_order, hero_layouts = _profile_hero_configuration(hass, client_id)
+        if profile_hero_order:
+            hero_entity_order = profile_hero_order
         effective_selected = _effective_client_entity_ids(hass)
         room_climate_ids = _resolved_room_climate_ids(hass, effective_selected)
         entities: list[dict[str, Any]] = []
@@ -577,6 +646,12 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                 "room_humidities": room_humidities,
                 "room_climate_entity_ids": room_climate_ids,
                 "hero_entity_order": hero_entity_order,
+                "hero_layout_version": 1,
+                "hero_layouts": hero_layouts,
+                "thermostat_card_style": thermostat_card_style,
+                "room_thermostat_card_styles": room_thermostat_card_styles,
+                "show_room_name": show_room_name,
+                "show_room_climate": show_room_climate,
                 # Selection model v2 metadata. Clients must use this as the
                 # authoritative whitelist: exact entity ids are rendered exactly,
                 # while sibling entities are allowed only for devices explicitly
