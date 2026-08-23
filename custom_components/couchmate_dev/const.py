@@ -1,4 +1,4 @@
-"""Constants for the parallel-installable CouchMate Core Dev Preview build."""
+"""Constants for the parallel CouchMate Core Dev Preview channel."""
 
 DOMAIN = "couchmate_dev"
 STORAGE_KEY = "couchmate_dev"
@@ -10,6 +10,8 @@ CONF_AREAS = "areas"
 CONF_DEVICES = "devices"
 CONF_ROOM_TEMPERATURES = "room_temperatures"
 CONF_ROOM_HUMIDITIES = "room_humidities"
+CONF_ROOM_CLIMATES = "room_climates"
+CONF_WEATHER_ENTITY = "weather_entity"
 CONF_SELECTION_MODEL = "selection_model"
 SELECTION_MODEL_VERSION = 2
 CONF_FILTER_MODE = "filter_mode"

@@ -24,6 +24,8 @@ from .const import (
     CONF_EXCLUDED_ENTITIES,
     CONF_ROOM_TEMPERATURES,
     CONF_ROOM_HUMIDITIES,
+    CONF_ROOM_CLIMATES,
+    CONF_WEATHER_ENTITY,
     CONF_SELECTION_MODEL,
     SELECTION_MODEL_VERSION,
     DOMAIN,
@@ -54,10 +56,9 @@ def _resolve_filter(
     every entity registered to that device is included. Explicit
     entity ids are added as-is. Result is unioned and deduplicated.
 
-    The set is rebuilt at setup time and on options-flow save. If a
-    user later assigns a *new* entity to an already-picked area, the
-    integration needs a reload (or restart) to see it — same trade-off
-    most HA filtering integrations make.
+    Callers may rebuild the set whenever Home Assistant's registries change.
+    The client API does this for every snapshot so newly added rooms, devices
+    and entities appear without reloading the integration.
     """
     if not (areas or devices or entities):
         return set()
@@ -102,8 +103,8 @@ from .management import async_setup_management
 
 _LOGGER = logging.getLogger(__name__)
 
-PANEL_URL_PATH = "couchmate-dev"
-PANEL_CONFIGURATOR_URL = "/couchmate-dev/configurator"
+PANEL_URL_PATH = "couchmate_dev"
+PANEL_CONFIGURATOR_URL = "/couchmate_dev/configurator"
 
 
 
@@ -145,6 +146,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             stored_excluded_entities = list(stored.get(CONF_EXCLUDED_ENTITIES, []))
             stored_room_temperatures = dict(stored.get(CONF_ROOM_TEMPERATURES, {}))
             stored_room_humidities = dict(stored.get(CONF_ROOM_HUMIDITIES, {}))
+            stored_room_climates = dict(stored.get(CONF_ROOM_CLIMATES, {}))
+            stored_weather_entity = stored.get(CONF_WEATHER_ENTITY)
             stored_selection_model = dict(stored.get(CONF_SELECTION_MODEL, {}))
             if stored_selection_model.get("version") == SELECTION_MODEL_VERSION:
                 model_areas = dict(stored_selection_model.get("areas", {}))
@@ -153,6 +156,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 stored_entities = []
                 stored_room_temperatures = {}
                 stored_room_humidities = {}
+                stored_room_climates = {}
+                stored_weather_entity = stored_selection_model.get("weather")
                 for area_id, area_cfg in model_areas.items():
                     if not isinstance(area_cfg, dict):
                         continue
@@ -160,6 +165,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         stored_room_temperatures[str(area_id)] = str(area_cfg["temperature"])
                     if area_cfg.get("humidity"):
                         stored_room_humidities[str(area_id)] = str(area_cfg["humidity"])
+                    if area_cfg.get("climate"):
+                        stored_room_climates[str(area_id)] = str(area_cfg["climate"])
                     for device_id, device_cfg in dict(area_cfg.get("devices", {})).items():
                         if not isinstance(device_cfg, dict):
                             continue
@@ -177,6 +184,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             stored_excluded_entities = list(entry.data.get(CONF_EXCLUDED_ENTITIES, []))
             stored_room_temperatures = dict(entry.data.get(CONF_ROOM_TEMPERATURES, {}))
             stored_room_humidities = dict(entry.data.get(CONF_ROOM_HUMIDITIES, {}))
+            stored_room_climates = dict(entry.data.get(CONF_ROOM_CLIMATES, {}))
+            stored_weather_entity = entry.data.get(CONF_WEATHER_ENTITY)
             stored_selection_model = dict(entry.data.get(CONF_SELECTION_MODEL, {}))
 
         # Resolve area + device picks down to a flat entity-id set,
@@ -198,6 +207,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN]["excluded_entities"] = stored_excluded_entities
         hass.data[DOMAIN]["room_temperatures"] = stored_room_temperatures
         hass.data[DOMAIN]["room_humidities"] = stored_room_humidities
+        hass.data[DOMAIN]["room_climates"] = stored_room_climates
+        hass.data[DOMAIN]["weather_entity"] = stored_weather_entity
         hass.data[DOMAIN]["selection_model"] = stored_selection_model if stored_selection_model.get("version") == SELECTION_MODEL_VERSION else {"version": SELECTION_MODEL_VERSION, "areas": {}}
         hass.data[DOMAIN]["entry"] = entry
 

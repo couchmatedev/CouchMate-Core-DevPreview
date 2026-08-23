@@ -212,11 +212,39 @@ class PairingManager:
         data = self._clients.get(client_id, {})
         return capability in set(data.get("capabilities", []))
 
-    async def async_revoke_client(self, client_id: str) -> bool:
-        removed = self._clients.pop(client_id, None) is not None
-        if removed:
+    async def async_rename_client(
+        self,
+        client_id: str,
+        device_name: str,
+    ) -> dict[str, Any] | None:
+        """Persist a user-facing name without changing the client identity."""
+        client = self._clients.get(client_id)
+        if client is None:
+            return None
+        normalized_name = " ".join(str(device_name).split())[:120]
+        if not normalized_name:
+            raise ValueError("device_name_required")
+        previous_name = client.get("device_name")
+        client["device_name"] = normalized_name
+        try:
             await self._async_save_clients()
-        return removed
+        except Exception:
+            if previous_name is None:
+                client.pop("device_name", None)
+            else:
+                client["device_name"] = previous_name
+            raise
+        return self.client_info(client_id)
+
+    async def async_revoke_client(self, client_id: str) -> bool:
+        client = self._clients.pop(client_id, None)
+        if client is not None:
+            try:
+                await self._async_save_clients()
+            except Exception:
+                self._clients[client_id] = client
+                raise
+        return client is not None
 
     def cleanup(self) -> None:
         expired = [sid for sid, session in self._sessions.items() if session.refresh_status() == PairingStatus.EXPIRED]

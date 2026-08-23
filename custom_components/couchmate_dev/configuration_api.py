@@ -82,9 +82,9 @@ def _admin_pairing_payload(session: PairingSession) -> dict[str, Any]:
 
 def _admin_pairing_for_action(
     request: web.Request,
+    session_id: str,
 ) -> tuple[PairingSession | None, web.Response | None]:
     """Resolve one pending request and return a precise lifecycle error."""
-    session_id = request.match_info.get("session_id", "")
     if not _PAIRING_SESSION_ID_RE.fullmatch(session_id):
         return None, _error("invalid_session_id", 400)
     session = _pairing(request.app["hass"]).get_by_session_id(session_id)
@@ -147,6 +147,7 @@ def _allowed_area_ids(hass) -> set[str]:
     allowed.update(str(area_id) for area_id in runtime.get("areas", []) if area_id)
     allowed.update(map(str, runtime.get("room_temperatures", {})))
     allowed.update(map(str, runtime.get("room_humidities", {})))
+    allowed.update(map(str, runtime.get("room_climates", {})))
     entity_registry = er.async_get(hass)
     device_registry = dr.async_get(hass)
     for entity_id in runtime.get("entities", []):
@@ -278,18 +279,19 @@ def _client_response(request: web.Request, client_id: str) -> web.Response:
     profile = effective["profile"]
     allowed_area_ids = _allowed_area_ids(hass)
     authorization_scope = "\0".join(sorted(allowed_area_ids))
+    client = _pairing(hass).client_info(client_id) or {"client_id": client_id}
+    client_device_name = str(client.get("device_name", "Apple TV"))
     etag_value = hashlib.sha256(
         (
             f"v{_CLIENT_REPRESENTATION_VERSION}:"
             f"{document['revision']}:{profile['id']}:{profile['revision']}:"
-            f"{authorization_scope}"
+            f"{authorization_scope}:{client_device_name}"
         ).encode()
     ).hexdigest()
     etag = f'"{etag_value}"'
     headers = {"ETag": etag, "Cache-Control": "private, no-cache", "Vary": "Authorization"}
     if _etag_matches(request.headers.get("If-None-Match"), etag):
         return web.Response(status=304, headers=headers)
-    client = _pairing(hass).client_info(client_id) or {"client_id": client_id}
     return web.json_response({
         "schema_version": document["schema_version"],
         "revision": document["revision"],
@@ -526,17 +528,21 @@ class V2ClientBackgroundView(HomeAssistantView):
     name = "api:couchmate_dev:v2:client:background"
     requires_auth = False
 
-    async def get(self, request):
+    async def get(
+        self,
+        request,
+        area_id: str,
+        revision: str,
+        variant: str,
+    ):
         if await _client_id(request) is None:
             return _error("unauthorized", 401)
         hass = request.app["hass"]
-        area_id = request.match_info["area_id"]
-        variant = request.match_info["variant"]
         metadata = _backgrounds(hass).effective_background_for_area(area_id)
         if (
             area_id not in _allowed_area_ids(hass)
             or variant not in _VARIANTS
-            or _revision(metadata) != request.match_info["revision"]
+            or _revision(metadata) != revision
         ):
             return _error("not_found", 404)
         return _effective_area_file_response(
@@ -549,26 +555,24 @@ class V2ClientBackgroundMutationView(HomeAssistantView):
     name = "api:couchmate_dev:v2:client:background:mutation"
     requires_auth = False
 
-    async def put(self, request):
+    async def put(self, request, area_id: str):
         client_id = await _client_id(request)
         if client_id is None:
             return _error("unauthorized", 401)
         hass = request.app["hass"]
         if not _pairing(hass).client_has_capability(client_id, "backgrounds:write"):
             return _error("capability_required", 403)
-        area_id = request.match_info["area_id"]
         if area_id not in _allowed_area_ids(hass):
             return _error("not_found", 404)
         return await _store_background(request, area_id)
 
-    async def delete(self, request):
+    async def delete(self, request, area_id: str):
         client_id = await _client_id(request)
         if client_id is None:
             return _error("unauthorized", 401)
         hass = request.app["hass"]
         if not _pairing(hass).client_has_capability(client_id, "backgrounds:write"):
             return _error("capability_required", 403)
-        area_id = request.match_info["area_id"]
         if area_id not in _allowed_area_ids(hass):
             return _error("not_found", 404)
         await _backgrounds(hass).async_remove_background(area_id)
@@ -655,11 +659,11 @@ class V2AdminPairingApproveView(HomeAssistantView):
     name = "api:couchmate_dev:v2:admin:pairing_request:approve"
     requires_auth = True
 
-    async def post(self, request):
+    async def post(self, request, session_id: str):
         denied = _require_admin(request)
         if denied is not None:
             return _no_store(denied)
-        session, error = _admin_pairing_for_action(request)
+        session, error = _admin_pairing_for_action(request, session_id)
         if error is not None:
             return _no_store(error)
         if session is None:
@@ -686,11 +690,11 @@ class V2AdminPairingRejectView(HomeAssistantView):
     name = "api:couchmate_dev:v2:admin:pairing_request:reject"
     requires_auth = True
 
-    async def post(self, request):
+    async def post(self, request, session_id: str):
         denied = _require_admin(request)
         if denied is not None:
             return _no_store(denied)
-        session, error = _admin_pairing_for_action(request)
+        session, error = _admin_pairing_for_action(request, session_id)
         if error is not None:
             return _no_store(error)
         if session is None:
@@ -759,14 +763,14 @@ class V2AdminProfileView(HomeAssistantView):
     name = "api:couchmate_dev:v2:admin:profile"
     requires_auth = True
 
-    async def patch(self, request):
+    async def patch(self, request, profile_id: str):
         denied = _require_admin(request)
         if denied is not None:
             return denied
         try:
             body = await _json_body(request)
             profile = await _configuration(request.app["hass"]).async_update_profile(
-                request.match_info["profile_id"],
+                profile_id,
                 name=body.get("name"),
                 settings=body.get("settings"),
                 expected_revision=body.get("expected_revision"),
@@ -775,14 +779,14 @@ class V2AdminProfileView(HomeAssistantView):
         except Exception as err:  # noqa: BLE001
             return _operation_error(err)
 
-    async def delete(self, request):
+    async def delete(self, request, profile_id: str):
         denied = _require_admin(request)
         if denied is not None:
             return denied
         try:
             body = await _json_body(request)
             await _configuration(request.app["hass"]).async_delete_profile(
-                request.match_info["profile_id"], body.get("expected_revision")
+                profile_id, body.get("expected_revision")
             )
             return web.json_response({"success": True})
         except Exception as err:  # noqa: BLE001
@@ -794,12 +798,11 @@ class V2AdminClientProfileView(HomeAssistantView):
     name = "api:couchmate_dev:v2:admin:client:profile"
     requires_auth = True
 
-    async def put(self, request):
+    async def put(self, request, client_id: str):
         denied = _require_admin(request)
         if denied is not None:
             return denied
         hass = request.app["hass"]
-        client_id = request.match_info["client_id"]
         if _pairing(hass).client_info(client_id) is None:
             return _error("not_found", 404)
         try:
@@ -808,6 +811,48 @@ class V2AdminClientProfileView(HomeAssistantView):
                 client_id, body.get("profile_id"), body.get("expected_revision")
             )
             return web.json_response({"success": True})
+        except Exception as err:  # noqa: BLE001
+            return _operation_error(err)
+
+
+class V2AdminClientView(HomeAssistantView):
+    """Rename or revoke one paired Apple TV or Companion App."""
+
+    url = "/api/couchmate_dev/v2/admin/clients/{client_id}"
+    name = "api:couchmate_dev:v2:admin:client"
+    requires_auth = True
+
+    async def patch(self, request, client_id: str):
+        denied = _require_admin(request)
+        if denied is not None:
+            return denied
+        try:
+            body = await _json_body(request)
+            client = await _pairing(request.app["hass"]).async_rename_client(
+                client_id,
+                body.get("device_name", ""),
+            )
+            if client is None:
+                return _error("not_found", 404)
+            return web.json_response({"success": True, "client": client})
+        except ValueError:
+            return _error("device_name_required", 400)
+        except Exception as err:  # noqa: BLE001
+            return _operation_error(err)
+
+    async def delete(self, request, client_id: str):
+        denied = _require_admin(request)
+        if denied is not None:
+            return denied
+        hass = request.app["hass"]
+        client = _pairing(hass).client_info(client_id)
+        if client is None:
+            return _error("not_found", 404)
+        try:
+            if not await _pairing(hass).async_revoke_client(client_id):
+                return _error("not_found", 404)
+            await _configuration(hass).async_remove_client_assignment(client_id)
+            return web.json_response({"success": True, "client": client})
         except Exception as err:  # noqa: BLE001
             return _operation_error(err)
 
@@ -852,12 +897,11 @@ class V2AdminBackgroundView(HomeAssistantView):
     name = "api:couchmate_dev:v2:admin:background"
     requires_auth = True
 
-    async def get(self, request):
+    async def get(self, request, area_id: str):
         denied = _require_admin(request)
         if denied is not None:
             return denied
         hass = request.app["hass"]
-        area_id = request.match_info["area_id"]
         if (
             ar.async_get(hass).async_get_area(area_id) is None
             and _backgrounds(hass).background_override_for_area(area_id) is None
@@ -870,18 +914,17 @@ class V2AdminBackgroundView(HomeAssistantView):
             request, area_id, variant, immutable=False
         )
 
-    async def put(self, request):
+    async def put(self, request, area_id: str):
         denied = _require_admin(request)
         if denied is not None:
             return denied
-        return await _store_background(request, request.match_info["area_id"])
+        return await _store_background(request, area_id)
 
-    async def delete(self, request):
+    async def delete(self, request, area_id: str):
         denied = _require_admin(request)
         if denied is not None:
             return denied
         hass = request.app["hass"]
-        area_id = request.match_info["area_id"]
         if (
             ar.async_get(hass).async_get_area(area_id) is None
             and _backgrounds(hass).background_for_area(area_id) is None
@@ -906,6 +949,7 @@ async def async_setup_configuration_api(hass) -> None:
         V2AdminConfigurationView(),
         V2AdminProfilesView(),
         V2AdminProfileView(),
+        V2AdminClientView(),
         V2AdminClientProfileView(),
         V2AdminHomeBackgroundView(),
         V2AdminBackgroundView(),

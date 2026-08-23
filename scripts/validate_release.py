@@ -19,51 +19,55 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENTS = ROOT / "custom_components"
-PACKAGE = COMPONENTS / "couchmate"
-EXPECTED_VERSION = "1.4.0-beta.2"
+PACKAGE = COMPONENTS / "couchmate_dev"
+EXPECTED_VERSION = "1.4.0-beta.6"
 EXPECTED_BRAND = "CouchMate Core Dev Preview"
-FORBIDDEN_NAMESPACES = ("couchmate_dev", "couchmate-dev")
+FORBIDDEN_NAMESPACES = (
+    "/api/couchmate/",
+    "api:couchmate:",
+    '"domain": "couchmate"',
+)
 
 REQUIRED_V1_VIEWS = {
     "CouchMateEntitiesView": (
-        "/api/couchmate/entities",
-        "api:couchmate:entities",
+        "/api/couchmate_dev/entities",
+        "api:couchmate_dev:entities",
     ),
     "CouchMateInfoView": (
-        "/api/couchmate/info",
-        "api:couchmate:info",
+        "/api/couchmate_dev/info",
+        "api:couchmate_dev:info",
     ),
     "PairingCreateView": (
-        "/api/couchmate/pairing/create",
-        "api:couchmate:pairing:create",
+        "/api/couchmate_dev/pairing/create",
+        "api:couchmate_dev:pairing:create",
     ),
     "PairingStatusView": (
-        "/api/couchmate/pairing/status",
-        "api:couchmate:pairing:status",
+        "/api/couchmate_dev/pairing/status",
+        "api:couchmate_dev:pairing:status",
     ),
     "PairingApproveView": (
-        "/api/couchmate/pairing/approve",
-        "api:couchmate:pairing:approve",
+        "/api/couchmate_dev/pairing/approve",
+        "api:couchmate_dev:pairing:approve",
     ),
     "PairingExchangeView": (
-        "/api/couchmate/pairing/exchange",
-        "api:couchmate:pairing:exchange",
+        "/api/couchmate_dev/pairing/exchange",
+        "api:couchmate_dev:pairing:exchange",
     ),
     "PairingCancelView": (
-        "/api/couchmate/pairing/cancel",
-        "api:couchmate:pairing:cancel",
+        "/api/couchmate_dev/pairing/cancel",
+        "api:couchmate_dev:pairing:cancel",
     ),
     "CouchMateClientInfoView": (
-        "/api/couchmate/client/info",
-        "api:couchmate:client:info",
+        "/api/couchmate_dev/client/info",
+        "api:couchmate_dev:client:info",
     ),
     "CouchMateClientEntitiesView": (
-        "/api/couchmate/client/entities",
-        "api:couchmate:client:entities",
+        "/api/couchmate_dev/client/entities",
+        "api:couchmate_dev:client:entities",
     ),
     "CouchMateClientServiceView": (
-        "/api/couchmate/client/service",
-        "api:couchmate:client:service",
+        "/api/couchmate_dev/client/service",
+        "api:couchmate_dev:client:service",
     ),
 }
 
@@ -116,22 +120,22 @@ def module_constants(path: Path) -> dict[str, Any]:
 
 def check_layout_and_metadata() -> None:
     """Verify HACS installs exactly one canonical-domain package."""
-    require(PACKAGE.is_dir(), "missing custom_components/couchmate package")
+    require(PACKAGE.is_dir(), "missing custom_components/couchmate_dev package")
     require(
-        not (COMPONENTS / "couchmate_dev").exists(),
-        "legacy custom_components/couchmate_dev package must not be shipped",
+        not (COMPONENTS / "couchmate").exists(),
+        "custom_components/couchmate must not be shipped in the Dev Preview repository",
     )
     component_dirs = sorted(
         path.name for path in COMPONENTS.iterdir() if path.is_dir()
     )
     require(
-        component_dirs == ["couchmate"],
+        component_dirs == ["couchmate_dev"],
         f"unexpected custom component directories: {component_dirs}",
     )
 
     manifest = json.loads((PACKAGE / "manifest.json").read_text(encoding="utf-8"))
     hacs = json.loads((ROOT / "hacs.json").read_text(encoding="utf-8"))
-    require(manifest.get("domain") == "couchmate", "manifest domain must be couchmate")
+    require(manifest.get("domain") == "couchmate_dev", "manifest domain must be couchmate_dev")
     require(manifest.get("name") == EXPECTED_BRAND, "manifest must keep Dev Preview branding")
     require(manifest.get("version") == EXPECTED_VERSION, "manifest version is inconsistent")
     require(hacs.get("name") == EXPECTED_BRAND, "hacs.json must keep Dev Preview branding")
@@ -139,20 +143,20 @@ def check_layout_and_metadata() -> None:
 
     constants = module_constants(PACKAGE / "const.py")
     expected_constants = {
-        "DOMAIN": "couchmate",
-        "STORAGE_KEY": "couchmate",
-        "PAIRING_CLIENT_STORAGE_KEY": "couchmate.paired_clients",
-        "CONFIGURATION_STORAGE_KEY": "couchmate.configuration",
-        "BACKGROUND_DIRECTORY": "couchmate/backgrounds",
+        "DOMAIN": "couchmate_dev",
+        "STORAGE_KEY": "couchmate_dev",
+        "PAIRING_CLIENT_STORAGE_KEY": "couchmate_dev.paired_clients",
+        "CONFIGURATION_STORAGE_KEY": "couchmate_dev.configuration",
+        "BACKGROUND_DIRECTORY": "couchmate_dev/backgrounds",
     }
     for key, value in expected_constants.items():
         require(constants.get(key) == value, f"{key} must be {value!r}")
 
     init_constants = module_constants(PACKAGE / "__init__.py")
-    require(init_constants.get("PANEL_URL_PATH") == "couchmate", "panel path must be couchmate")
+    require(init_constants.get("PANEL_URL_PATH") == "couchmate_dev", "panel path must be couchmate_dev")
     require(
-        init_constants.get("PANEL_CONFIGURATOR_URL") == "/couchmate/configurator",
-        "panel configurator URL must use the canonical namespace",
+        init_constants.get("PANEL_CONFIGURATOR_URL") == "/couchmate_dev/configurator",
+        "panel configurator URL must use the Dev Preview namespace",
     )
 
     init_source = (PACKAGE / "__init__.py").read_text(encoding="utf-8")
@@ -267,7 +271,7 @@ def check_http_views() -> None:
             views[node.name] = (url, name, relative(path))
             view_nodes[node.name] = node
 
-    require(len(views) == 30, f"expected 30 HTTP views, found {len(views)}")
+    require(len(views) == 32, f"expected 32 HTTP views, found {len(views)}")
     urls = [item[0] for item in views.values()]
     names = [item[1] for item in views.values()]
     duplicate_urls = sorted(value for value, count in Counter(urls).items() if count > 1)
@@ -277,12 +281,12 @@ def check_http_views() -> None:
 
     for class_name, (url, name, path) in views.items():
         require(
-            url in {"/couchmate/configurator", "/couchmate/management"}
-            or url.startswith("/api/couchmate/"),
+            url in {"/couchmate_dev/configurator", "/couchmate_dev/management"}
+            or url.startswith("/api/couchmate_dev/"),
             f"non-canonical URL in {path}:{class_name}: {url}",
         )
         require(
-            name.startswith("api:couchmate:") or name.startswith("couchmate:"),
+            name.startswith("api:couchmate_dev:") or name.startswith("couchmate_dev:"),
             f"non-canonical view name in {path}:{class_name}: {name}",
         )
 
@@ -331,38 +335,17 @@ def check_http_views() -> None:
     require(not repeated, f"HTTP views instantiated more than once: {repeated}")
 
 
-def check_readme_migration_scope() -> None:
-    """Allow old namespace terms only in explicit migration warnings."""
+def check_readme_release_scope() -> None:
+    """Verify that the README documents the separate Dev Preview package."""
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     required_guidance = (
-        "darf nicht parallel dazu installiert werden",
-        "must not be installed alongside it",
-        "couchmate.uninstall",
-        "vollständig neu",
-        "full Home Assistant restart",
+        "custom_components/couchmate_dev",
+        "Domain: `couchmate_dev`",
+        "parallel zum stabilen Core",
+        "alongside the stable Core",
     )
     for phrase in required_guidance:
-        require(phrase in readme, f"README is missing switching guidance: {phrase!r}")
-
-    migration_headings = {
-        "## Einmaliger Wechsel von der früheren parallelen Dev Preview",
-        "## One-time migration from the former parallel Dev Preview",
-    }
-    current_heading = ""
-    violations: list[str] = []
-    for number, line in enumerate(readme.splitlines(), start=1):
-        if line.startswith("## "):
-            current_heading = line
-        if not any(forbidden in line for forbidden in FORBIDDEN_NAMESPACES):
-            continue
-        is_release_warning = line.startswith("> ") and "1.3.0-beta.3" in line
-        if current_heading not in migration_headings and not is_release_warning:
-            violations.append(f"README.md:{number}")
-    require(
-        not violations,
-        "legacy namespace terms are allowed only in migration guidance: "
-        + ", ".join(violations),
-    )
+        require(phrase in readme, f"README is missing Dev Preview guidance: {phrase!r}")
 
 
 def main() -> int:
@@ -372,7 +355,7 @@ def main() -> int:
         check_syntax_and_artifacts,
         check_namespace_and_versions,
         check_http_views,
-        check_readme_migration_scope,
+        check_readme_release_scope,
     )
     try:
         for check in checks:
@@ -382,7 +365,7 @@ def main() -> int:
         return 1
     print(
         "release validation: PASS "
-        f"({EXPECTED_BRAND}, {EXPECTED_VERSION}, 30 unique HTTP views)"
+        f"({EXPECTED_BRAND}, {EXPECTED_VERSION}, 32 unique HTTP views)"
     )
     return 0
 

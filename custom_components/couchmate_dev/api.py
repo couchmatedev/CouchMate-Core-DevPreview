@@ -11,13 +11,19 @@ from aiohttp import web
 import voluptuous as vol
 
 from homeassistant.components import persistent_notification
+from homeassistant.components.camera import (
+    async_get_image as async_get_camera_image,
+    async_request_stream,
+)
 from homeassistant.components.http import HomeAssistantView
+from homeassistant.components.image import async_get_image as async_get_image_entity
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN, PAIRING_MANAGER
+from .const import CONFIGURATION_MANAGER, DOMAIN, PAIRING_MANAGER
 from .pairing import PairingManager, PairingStatus
 from .storage import async_save_entities
 
@@ -26,6 +32,56 @@ _LOGGER = logging.getLogger(__name__)
 
 def _manager(hass: HomeAssistant) -> PairingManager:
     return hass.data[DOMAIN][PAIRING_MANAGER]
+
+
+def _profile_hero_configuration(
+    hass: HomeAssistant,
+    client_id: str,
+) -> tuple[dict[str, list[str]], dict[str, dict[str, str]]]:
+    """Return the normalized v1 Hero layout assigned to this client."""
+    configuration = hass.data.get(DOMAIN, {}).get(CONFIGURATION_MANAGER)
+    if configuration is None:
+        return {}, {}
+
+    profile = configuration.client_snapshot(client_id).get("profile", {})
+    settings = profile.get("settings", {})
+    companion = settings.get("companion", {}) if isinstance(settings, dict) else {}
+    if not isinstance(companion, dict):
+        return {}, {}
+
+    raw_orders = companion.get("hero_entity_order", {})
+    hero_orders = {
+        str(area_id): list(dict.fromkeys(
+            str(entity_id)
+            for entity_id in entity_ids
+            if isinstance(entity_id, str) and entity_id
+        ))[:3]
+        for area_id, entity_ids in raw_orders.items()
+        if isinstance(area_id, str) and isinstance(entity_ids, list)
+    } if isinstance(raw_orders, dict) else {}
+
+    allowed_styles = {
+        "thermostat_card_style": {"full_vertical", "full", "compact", "hidden"},
+        "device_card_style": {"bubble", "tile", "toggle", "icon"},
+        "camera_card_style": {"large", "compact"},
+        "media_card_style": {"transport", "compact"},
+    }
+    raw_layouts = companion.get("hero_layouts", {})
+    hero_layouts: dict[str, dict[str, str]] = {}
+    if isinstance(raw_layouts, dict):
+        for area_id, raw_layout in raw_layouts.items():
+            if not isinstance(area_id, str) or not isinstance(raw_layout, dict):
+                continue
+            normalized = {
+                key: value
+                for key, choices in allowed_styles.items()
+                if isinstance((value := raw_layout.get(key)), str)
+                and value in choices
+            }
+            if normalized:
+                hero_layouts[area_id] = normalized
+
+    return hero_orders, hero_layouts
 
 
 def _pairing_response(payload: Mapping[str, Any], status: int = 200) -> web.Response:
@@ -97,11 +153,30 @@ def _entity_payload(hass: HomeAssistant, entity_id: str) -> dict[str, Any] | Non
 def _effective_client_entity_ids(hass: HomeAssistant) -> list[str]:
     """Return the entities exposed to and controllable by a CouchMate client."""
     domain_data = hass.data.get(DOMAIN, {})
-    selected = list(domain_data.get("entities", []))
+    configured_area_ids = list(domain_data.get("areas", []))
     full_device_ids = set(domain_data.get("devices", []))
+    explicit_entity_ids = list(domain_data.get("explicit_entities", []))
+    excluded_entity_ids = list(domain_data.get("excluded_entities", []))
     room_temperature_ids = dict(domain_data.get("room_temperatures", {}))
     room_humidity_ids = dict(domain_data.get("room_humidities", {}))
+    room_climate_ids = dict(domain_data.get("room_climates", {}))
+    weather_entity_id = domain_data.get("weather_entity")
     selection_model = dict(domain_data.get("selection_model", {}))
+
+    # Resolve registry-backed selections for every client snapshot instead of
+    # relying on the flattened list created when Core started or the selection
+    # was saved. Home Assistant can add an entity to a selected device or add a
+    # device to a legacy selected area at any time; polling clients must see
+    # those changes without a Core reload.
+    from . import _resolve_filter
+
+    selected = sorted(_resolve_filter(
+        hass,
+        areas=configured_area_ids,
+        devices=list(full_device_ids),
+        entities=explicit_entity_ids,
+        excluded_entities=excluded_entity_ids,
+    ))
 
     entity_registry = er.async_get(hass)
     device_registry = dr.async_get(hass)
@@ -112,7 +187,7 @@ def _effective_client_entity_ids(hass: HomeAssistant) -> list[str]:
         and hass.states.get(entry.entity_id) is not None
     ]
 
-    configured_area_ids = {
+    selection_model_area_ids = {
         str(area_id)
         for area_id in dict(selection_model.get("areas", {})).keys()
         if area_id
@@ -125,7 +200,7 @@ def _effective_client_entity_ids(hass: HomeAssistant) -> list[str]:
             continue
         device = device_registry.async_get(entry.device_id) if entry.device_id else None
         entity_area_id = entry.area_id or (device.area_id if device else None)
-        if entity_area_id and entity_area_id in configured_area_ids:
+        if entity_area_id and entity_area_id in selection_model_area_ids:
             configured_media_entity_ids.append(entry.entity_id)
 
     return list(dict.fromkeys([
@@ -134,7 +209,47 @@ def _effective_client_entity_ids(hass: HomeAssistant) -> list[str]:
         *configured_media_entity_ids,
         *room_temperature_ids.values(),
         *room_humidity_ids.values(),
+        *room_climate_ids.values(),
+        *([weather_entity_id] if weather_entity_id else []),
     ]))
+
+
+def _resolved_room_climate_ids(
+    hass: HomeAssistant,
+    effective_entity_ids: list[str],
+) -> dict[str, str]:
+    """Resolve one controllable thermostat per room without guessing.
+
+    An explicitly configured climate source always wins.  Otherwise a room
+    receives a fallback only when exactly one exposed, available climate
+    entity belongs to it.
+    """
+    configured = {
+        str(area_id): str(entity_id)
+        for area_id, entity_id in dict(
+            hass.data.get(DOMAIN, {}).get("room_climates", {})
+        ).items()
+        if area_id and entity_id and hass.states.get(str(entity_id)) is not None
+    }
+    candidates: dict[str, list[str]] = {}
+
+    for entity_id in effective_entity_ids:
+        if not entity_id.startswith("climate."):
+            continue
+        state = hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable"):
+            continue
+        payload = _entity_payload(hass, entity_id)
+        area_id = payload.get("area_id") if payload else None
+        if area_id:
+            candidates.setdefault(str(area_id), []).append(entity_id)
+
+    for area_id, entity_ids in candidates.items():
+        unique_ids = list(dict.fromkeys(entity_ids))
+        if area_id not in configured and len(unique_ids) == 1:
+            configured[area_id] = unique_ids[0]
+
+    return configured
 
 
 class CouchMateEntitiesView(HomeAssistantView):
@@ -186,7 +301,7 @@ class CouchMateInfoView(HomeAssistantView):
         hass = request.app["hass"]
         return web.json_response({
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.3.0-beta.3",
+            "version": "1.4.0-beta.6",
             "domain": DOMAIN,
             "filtered_entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
             "pairing": True,
@@ -330,7 +445,7 @@ class CouchMateClientInfoView(HomeAssistantView):
         return web.json_response({
             "client_id": client_id,
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.3.0-beta.3",
+            "version": "1.4.0-beta.6",
             "status": "active",
             "entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
         })
@@ -351,7 +466,33 @@ class CouchMateClientEntitiesView(HomeAssistantView):
         full_device_ids = list(hass.data.get(DOMAIN, {}).get("devices", []))
         room_temperature_ids = dict(hass.data.get(DOMAIN, {}).get("room_temperatures", {}))
         room_humidity_ids = dict(hass.data.get(DOMAIN, {}).get("room_humidities", {}))
+        selection_model = dict(hass.data.get(DOMAIN, {}).get("selection_model", {}))
+        thermostat_card_style = selection_model.get("thermostat_card_style", "full")
+        if thermostat_card_style not in ("full_vertical", "full", "compact", "hidden"):
+            thermostat_card_style = "full"
+        show_room_name = selection_model.get("show_room_name", True)
+        if not isinstance(show_room_name, bool):
+            show_room_name = True
+        show_room_climate = selection_model.get("show_room_climate", True)
+        if not isinstance(show_room_climate, bool):
+            show_room_climate = True
+        room_thermostat_card_styles = {
+            str(area_id): str(area_cfg["thermostat_card_style"])
+            for area_id, area_cfg in dict(selection_model.get("areas", {})).items()
+            if isinstance(area_cfg, dict)
+            and area_cfg.get("thermostat_card_style")
+            in ("full_vertical", "full", "compact", "hidden")
+        }
+        hero_entity_order = {
+            str(area_id): [str(entity_id) for entity_id in area_cfg.get("hero_order", [])]
+            for area_id, area_cfg in dict(selection_model.get("areas", {})).items()
+            if isinstance(area_cfg, dict) and isinstance(area_cfg.get("hero_order"), list)
+        }
+        profile_hero_order, hero_layouts = _profile_hero_configuration(hass, client_id)
+        if profile_hero_order:
+            hero_entity_order = profile_hero_order
         effective_selected = _effective_client_entity_ids(hass)
+        room_climate_ids = _resolved_room_climate_ids(hass, effective_selected)
         entities: list[dict[str, Any]] = []
         skipped: list[str] = []
 
@@ -361,6 +502,12 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                 if payload is None:
                     skipped.append(entity_id)
                     continue
+                if entity_id.startswith(("camera.", "image.")):
+                    # The paired-client boundary has its own snapshot proxy.
+                    # Never leak Home Assistant's rotating image access token
+                    # or a signed entity_picture URL into client state/logs.
+                    payload["attributes"].pop("access_token", None)
+                    payload["attributes"].pop("entity_picture", None)
                 entities.append(payload)
             except Exception as err:  # noqa: BLE001
                 _LOGGER.exception("Unable to serialize CouchMate client entity %s", entity_id)
@@ -393,6 +540,30 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                 "name": payload.get("name"),
             }
 
+        # A room thermostat is the fallback climate source for each value that
+        # has no dedicated sensor selection. The thermostat itself remains in
+        # the entity list so the client can render it as a real control.
+        for area_id, entity_id in room_climate_ids.items():
+            if area_id in room_temperatures:
+                continue
+            payload = entities_by_id.get(entity_id)
+            current_temperature = (
+                payload.get("attributes", {}).get("current_temperature")
+                if payload is not None
+                else None
+            )
+            if payload is None or current_temperature is None:
+                continue
+            room_temperatures[area_id] = {
+                "area_id": area_id,
+                "area_name": payload.get("area_name"),
+                "entity_id": entity_id,
+                "state": str(current_temperature),
+                "unit_of_measurement": payload.get("attributes", {}).get("temperature_unit")
+                    or hass.config.units.temperature_unit,
+                "name": payload.get("name"),
+            }
+
         room_humidities: dict[str, dict[str, Any]] = {}
         for area_id, entity_id in room_humidity_ids.items():
             payload = entities_by_id.get(entity_id)
@@ -408,8 +579,30 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                 "name": payload.get("name"),
             }
 
+        for area_id, entity_id in room_climate_ids.items():
+            if area_id in room_humidities:
+                continue
+            payload = entities_by_id.get(entity_id)
+            attributes = payload.get("attributes", {}) if payload is not None else {}
+            current_humidity = attributes.get("current_humidity", attributes.get("humidity"))
+            if payload is None or current_humidity is None:
+                continue
+            room_humidities[area_id] = {
+                "area_id": area_id,
+                "area_name": payload.get("area_name"),
+                "entity_id": entity_id,
+                "state": str(current_humidity),
+                "unit_of_measurement": "%",
+                "name": payload.get("name"),
+            }
+
         weather: dict[str, Any] | None = None
-        weather_entity_ids = [entity_id for entity_id in selected if entity_id.startswith("weather.")]
+        configured_weather_entity = hass.data.get(DOMAIN, {}).get("weather_entity")
+        weather_entity_ids = (
+            [str(configured_weather_entity)]
+            if configured_weather_entity
+            else [entity_id for entity_id in selected if entity_id.startswith("weather.")]
+        )
         if not weather_entity_ids:
             weather_entity_ids = [state.entity_id for state in hass.states.async_all("weather") if state.state not in ("unknown", "unavailable")]
 
@@ -451,6 +644,14 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                 "room_temperatures": room_temperatures,
                 "room_humidity_entity_ids": room_humidity_ids,
                 "room_humidities": room_humidities,
+                "room_climate_entity_ids": room_climate_ids,
+                "hero_entity_order": hero_entity_order,
+                "hero_layout_version": 1,
+                "hero_layouts": hero_layouts,
+                "thermostat_card_style": thermostat_card_style,
+                "room_thermostat_card_styles": room_thermostat_card_styles,
+                "show_room_name": show_room_name,
+                "show_room_climate": show_room_climate,
                 # Selection model v2 metadata. Clients must use this as the
                 # authoritative whitelist: exact entity ids are rendered exactly,
                 # while sibling entities are allowed only for devices explicitly
@@ -464,6 +665,113 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                 "skipped": skipped,
             },
             headers={"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"},
+        )
+
+
+class CouchMateClientSnapshotView(HomeAssistantView):
+    """Serve one selected Home Assistant camera/image to a paired client."""
+
+    url = "/api/couchmate_dev/client/snapshot/{entity_id}"
+    name = "api:couchmate_dev:client:snapshot"
+    requires_auth = False
+
+    async def get(self, request: web.Request, entity_id: str) -> web.Response:
+        client_id = await _client_id_from_request(request)
+        if client_id is None:
+            return web.json_response({"error": "unauthorized"}, status=401)
+
+        hass = request.app["hass"]
+        entity_domain = entity_id.split(".", 1)[0]
+        if entity_domain not in {"camera", "image"}:
+            return web.json_response({"error": "invalid_image_entity"}, status=400)
+        if entity_id not in set(_effective_client_entity_ids(hass)):
+            return web.json_response({"error": "entity_not_selected"}, status=403)
+        if hass.states.get(entity_id) is None:
+            return web.json_response({"error": "entity_not_found"}, status=404)
+
+        try:
+            if entity_domain == "camera":
+                image = await async_get_camera_image(
+                    hass,
+                    entity_id,
+                    timeout=10,
+                    width=1280,
+                    height=720,
+                )
+            else:
+                image = await async_get_image_entity(
+                    hass,
+                    entity_id,
+                    timeout=10,
+                )
+        except (HomeAssistantError, TimeoutError, ValueError, KeyError) as err:
+            _LOGGER.warning(
+                "Unable to load camera snapshot %s for CouchMate client %s: %s",
+                entity_id,
+                client_id,
+                err,
+            )
+            return web.json_response(
+                {"error": "snapshot_unavailable"},
+                status=502,
+                headers={"Cache-Control": "no-store"},
+            )
+
+        return web.Response(
+            body=image.content,
+            content_type=image.content_type,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+            },
+        )
+
+
+class CouchMateClientStreamView(HomeAssistantView):
+    """Start one selected camera's tokenized Home Assistant HLS stream."""
+
+    url = "/api/couchmate_dev/client/stream/{entity_id}"
+    name = "api:couchmate_dev:client:stream"
+    requires_auth = False
+
+    async def post(self, request: web.Request, entity_id: str) -> web.Response:
+        client_id = await _client_id_from_request(request)
+        if client_id is None:
+            return web.json_response({"error": "unauthorized"}, status=401)
+
+        hass = request.app["hass"]
+        if not entity_id.startswith("camera."):
+            return web.json_response({"error": "invalid_camera"}, status=400)
+        if entity_id not in set(_effective_client_entity_ids(hass)):
+            return web.json_response({"error": "entity_not_selected"}, status=403)
+        if hass.states.get(entity_id) is None:
+            return web.json_response({"error": "entity_not_found"}, status=404)
+
+        try:
+            stream_url = await async_request_stream(hass, entity_id, "hls")
+        except (HomeAssistantError, TimeoutError, ValueError, KeyError) as err:
+            _LOGGER.warning(
+                "Unable to start camera stream %s for CouchMate client %s: %s",
+                entity_id,
+                client_id,
+                err,
+            )
+            return web.json_response(
+                {"error": "stream_unavailable"},
+                status=422,
+                headers={"Cache-Control": "no-store"},
+            )
+
+        return web.json_response(
+            {
+                "entity_id": entity_id,
+                "url": stream_url,
+                "content_type": "application/vnd.apple.mpegurl",
+            },
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+                "Pragma": "no-cache",
+            },
         )
 
 
@@ -561,6 +869,8 @@ async def async_setup_api(hass: HomeAssistant) -> None:
         PairingCancelView(),
         CouchMateClientInfoView(),
         CouchMateClientEntitiesView(),
+        CouchMateClientSnapshotView(),
+        CouchMateClientStreamView(),
         CouchMateClientServiceView(),
     ):
         hass.http.register_view(view)

@@ -651,6 +651,18 @@ class ConfigurationManager:
             await self._commit(candidate)
             return self.client_snapshot(normalized_client_id)
 
+    async def async_remove_client_assignment(self, client_id: str) -> bool:
+        """Remove configuration state that belonged to a revoked client."""
+        await self.async_initialize()
+        normalized_client_id = _require_identifier(client_id, field="client_id")
+        async with self._lock:
+            if normalized_client_id not in self._data["client_assignments"]:
+                return False
+            candidate = deepcopy(self._data)
+            del candidate["client_assignments"][normalized_client_id]
+            await self._commit(candidate)
+            return True
+
     async def async_update_assigned_profile_settings(
         self,
         client_id: str,
