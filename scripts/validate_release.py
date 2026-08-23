@@ -20,7 +20,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENTS = ROOT / "custom_components"
 PACKAGE = COMPONENTS / "couchmate_dev"
-EXPECTED_VERSION = "1.4.0-beta.6"
+EXPECTED_VERSION = "1.4.0-beta.7"
 EXPECTED_BRAND = "CouchMate Core Dev Preview"
 FORBIDDEN_NAMESPACES = (
     "/api/couchmate/",
