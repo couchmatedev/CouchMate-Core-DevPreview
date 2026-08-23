@@ -61,7 +61,7 @@ def _profile_hero_configuration(
     } if isinstance(raw_orders, dict) else {}
 
     allowed_styles = {
-        "thermostat_card_style": {"full_vertical", "full", "compact", "hidden"},
+        "thermostat_card_style": {"ring", "full_vertical", "full", "compact", "hidden"},
         "device_card_style": {"bubble", "tile", "toggle", "icon"},
         "camera_card_style": {"large", "compact"},
         "media_card_style": {"transport", "compact"},
@@ -468,7 +468,7 @@ class CouchMateClientEntitiesView(HomeAssistantView):
         room_humidity_ids = dict(hass.data.get(DOMAIN, {}).get("room_humidities", {}))
         selection_model = dict(hass.data.get(DOMAIN, {}).get("selection_model", {}))
         thermostat_card_style = selection_model.get("thermostat_card_style", "full")
-        if thermostat_card_style not in ("full_vertical", "full", "compact", "hidden"):
+        if thermostat_card_style not in ("ring", "full_vertical", "full", "compact", "hidden"):
             thermostat_card_style = "full"
         show_room_name = selection_model.get("show_room_name", True)
         if not isinstance(show_room_name, bool):
@@ -481,7 +481,7 @@ class CouchMateClientEntitiesView(HomeAssistantView):
             for area_id, area_cfg in dict(selection_model.get("areas", {})).items()
             if isinstance(area_cfg, dict)
             and area_cfg.get("thermostat_card_style")
-            in ("full_vertical", "full", "compact", "hidden")
+            in ("ring", "full_vertical", "full", "compact", "hidden")
         }
         hero_entity_order = {
             str(area_id): [str(entity_id) for entity_id in area_cfg.get("hero_order", [])]
