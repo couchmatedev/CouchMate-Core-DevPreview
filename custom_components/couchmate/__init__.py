@@ -33,6 +33,7 @@ from .const import (
     STORAGE_VERSION,
     CONFIGURATION_MANAGER,
     BACKGROUND_MANAGER,
+    DIAGNOSTICS_MANAGER,
     PAIRING_CLIENT_STORAGE_KEY,
     PAIRING_CLIENT_STORAGE_VERSION,
 )
@@ -98,6 +99,7 @@ from .api import async_setup_api
 from .configurator import async_setup_configurator
 from .configuration import ConfigurationManager
 from .backgrounds import BackgroundManager
+from .diagnostics import DiagnosticsManager
 from .configuration_api import async_setup_configuration_api
 from .management import async_setup_management
 
@@ -129,6 +131,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         background_manager = BackgroundManager(hass, configuration_manager)
         hass.data[DOMAIN][CONFIGURATION_MANAGER] = configuration_manager
         hass.data[DOMAIN][BACKGROUND_MANAGER] = background_manager
+        hass.data[DOMAIN][DIAGNOSTICS_MANAGER] = DiagnosticsManager()
         try:
             await background_manager.async_cleanup(ar.async_get(hass).areas)
         except Exception:
@@ -167,6 +170,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         stored_room_humidities[str(area_id)] = str(area_cfg["humidity"])
                     if area_cfg.get("climate"):
                         stored_room_climates[str(area_id)] = str(area_cfg["climate"])
+                    stored_entities.extend(
+                        str(entity_id)
+                        for entity_id in area_cfg.get("flow_entities", [])
+                        if entity_id
+                    )
                     for device_id, device_cfg in dict(area_cfg.get("devices", {})).items():
                         if not isinstance(device_cfg, dict):
                             continue

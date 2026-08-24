@@ -20,7 +20,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENTS = ROOT / "custom_components"
 PACKAGE = COMPONENTS / "couchmate"
-EXPECTED_VERSION = "1.4.0-beta.8"
+EXPECTED_VERSION = "1.4.0-beta.11"
 EXPECTED_BRAND = "CouchMate Core Dev Preview"
 FORBIDDEN_NAMESPACES = (
     "/api/couchmate_dev/",
@@ -267,7 +267,7 @@ def check_http_views() -> None:
             views[node.name] = (url, name, relative(path))
             view_nodes[node.name] = node
 
-    require(len(views) == 32, f"expected 32 HTTP views, found {len(views)}")
+    require(len(views) == 35, f"expected 35 HTTP views, found {len(views)}")
     urls = [item[0] for item in views.values()]
     names = [item[1] for item in views.values()]
     duplicate_urls = sorted(value for value, count in Counter(urls).items() if count > 1)
@@ -361,7 +361,7 @@ def main() -> int:
         return 1
     print(
         "release validation: PASS "
-        f"({EXPECTED_BRAND}, {EXPECTED_VERSION}, 32 unique HTTP views)"
+        f"({EXPECTED_BRAND}, {EXPECTED_VERSION}, 35 unique HTTP views)"
     )
     return 0
 

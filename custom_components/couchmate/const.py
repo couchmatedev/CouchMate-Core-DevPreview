@@ -44,3 +44,7 @@ DEFAULT_PROFILE_ID = "default"
 BACKGROUND_MANAGER = "background_manager"
 BACKGROUND_DIRECTORY = "couchmate/backgrounds"
 BACKGROUND_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+# Screenshots are diagnostics only. They remain in memory and expire instead
+# of being written into Home Assistant's persistent storage.
+DIAGNOSTICS_MANAGER = "diagnostics_manager"

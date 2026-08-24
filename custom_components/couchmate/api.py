@@ -23,7 +23,8 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
-from .const import CONFIGURATION_MANAGER, DOMAIN, PAIRING_MANAGER
+from .const import CONFIGURATION_MANAGER, DIAGNOSTICS_MANAGER, DOMAIN, PAIRING_MANAGER
+from .diagnostics import DiagnosticsManager, SCREENSHOT_MAX_BYTES
 from .pairing import PairingManager, PairingStatus
 from .storage import async_save_entities
 
@@ -32,6 +33,10 @@ _LOGGER = logging.getLogger(__name__)
 
 def _manager(hass: HomeAssistant) -> PairingManager:
     return hass.data[DOMAIN][PAIRING_MANAGER]
+
+
+def _diagnostics(hass: HomeAssistant) -> DiagnosticsManager:
+    return hass.data[DOMAIN][DIAGNOSTICS_MANAGER]
 
 
 def _profile_hero_configuration(
@@ -160,8 +165,14 @@ def _effective_client_entity_ids(hass: HomeAssistant) -> list[str]:
     room_temperature_ids = dict(domain_data.get("room_temperatures", {}))
     room_humidity_ids = dict(domain_data.get("room_humidities", {}))
     room_climate_ids = dict(domain_data.get("room_climates", {}))
-    weather_entity_id = domain_data.get("weather_entity")
     selection_model = dict(domain_data.get("selection_model", {}))
+    configured_flow_entity_ids = [
+        str(entity_id)
+        for area_cfg in dict(selection_model.get("areas", {})).values()
+        if isinstance(area_cfg, dict)
+        for entity_id in area_cfg.get("flow_entities", [])[:3]
+        if entity_id
+    ]
 
     # Resolve registry-backed selections for every client snapshot instead of
     # relying on the flattened list created when Core started or the selection
@@ -203,15 +214,24 @@ def _effective_client_entity_ids(hass: HomeAssistant) -> list[str]:
         if entity_area_id and entity_area_id in selection_model_area_ids:
             configured_media_entity_ids.append(entry.entity_id)
 
-    return list(dict.fromkeys([
+    effective_entity_ids = list(dict.fromkeys([
         *selected,
         *full_device_entity_ids,
         *configured_media_entity_ids,
         *room_temperature_ids.values(),
         *room_humidity_ids.values(),
         *room_climate_ids.values(),
-        *([weather_entity_id] if weather_entity_id else []),
+        *configured_flow_entity_ids,
     ]))
+
+    # Weather is configured once for the global dashboard header. It must not
+    # enter the room entity stream, otherwise the weather station's Home
+    # Assistant area (for example "Garten") becomes an unintended room.
+    return [
+        entity_id
+        for entity_id in effective_entity_ids
+        if not entity_id.startswith("weather.")
+    ]
 
 
 def _resolved_room_climate_ids(
@@ -301,7 +321,7 @@ class CouchMateInfoView(HomeAssistantView):
         hass = request.app["hass"]
         return web.json_response({
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.4.0-beta.8",
+            "version": "1.4.0-beta.11",
             "domain": DOMAIN,
             "filtered_entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
             "pairing": True,
@@ -445,7 +465,7 @@ class CouchMateClientInfoView(HomeAssistantView):
         return web.json_response({
             "client_id": client_id,
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.4.0-beta.8",
+            "version": "1.4.0-beta.11",
             "status": "active",
             "entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
         })
@@ -487,6 +507,15 @@ class CouchMateClientEntitiesView(HomeAssistantView):
             str(area_id): [str(entity_id) for entity_id in area_cfg.get("hero_order", [])]
             for area_id, area_cfg in dict(selection_model.get("areas", {})).items()
             if isinstance(area_cfg, dict) and isinstance(area_cfg.get("hero_order"), list)
+        }
+        flow_entity_order = {
+            str(area_id): [
+                str(entity_id)
+                for entity_id in area_cfg.get("flow_entities", [])[:3]
+            ]
+            for area_id, area_cfg in dict(selection_model.get("areas", {})).items()
+            if isinstance(area_cfg, dict)
+            and isinstance(area_cfg.get("flow_entities"), list)
         }
         profile_hero_order, hero_layouts = _profile_hero_configuration(hass, client_id)
         if profile_hero_order:
@@ -634,6 +663,8 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                 except Exception as err:  # noqa: BLE001
                     _LOGGER.debug("Unable to load daily weather forecast for %s: %s", weather_entity_id, err)
 
+        screenshot_request = _diagnostics(hass).pending_for_target(client_id)
+
         return web.json_response(
             {
                 "client_id": client_id,
@@ -646,12 +677,16 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                 "room_humidities": room_humidities,
                 "room_climate_entity_ids": room_climate_ids,
                 "hero_entity_order": hero_entity_order,
+                "flow_entity_order": flow_entity_order,
                 "hero_layout_version": 1,
                 "hero_layouts": hero_layouts,
                 "thermostat_card_style": thermostat_card_style,
                 "room_thermostat_card_styles": room_thermostat_card_styles,
                 "show_room_name": show_room_name,
                 "show_room_climate": show_room_climate,
+                "diagnostic_screenshot_request": (
+                    screenshot_request.metadata() if screenshot_request else None
+                ),
                 # Selection model v2 metadata. Clients must use this as the
                 # authoritative whitelist: exact entity ids are rendered exactly,
                 # while sibling entities are allowed only for devices explicitly
@@ -858,6 +893,156 @@ class CouchMateClientServiceView(HomeAssistantView):
         })
 
 
+def _is_screenshot_controller(hass: HomeAssistant, client_id: str) -> bool:
+    """Only configuration-authorized clients may request diagnostic images."""
+    return _manager(hass).client_has_capability(client_id, "configuration:write")
+
+
+def _screenshot_target(hass: HomeAssistant, client_id: str) -> dict[str, Any] | None:
+    """Return one eligible Apple-TV client without exposing credentials."""
+    client = _manager(hass).client_info(client_id)
+    if client is None or "configuration:write" in set(client.get("capabilities", [])):
+        return None
+    return {
+        "client_id": client_id,
+        "device_name": client.get("device_name", "Apple TV"),
+        "last_seen": client.get("last_seen"),
+    }
+
+
+class CouchMateClientDiagnosticScreenshotsView(HomeAssistantView):
+    """List screenshot targets and create an on-demand capture request."""
+
+    url = "/api/couchmate/v2/client/diagnostics/screenshots"
+    name = "api:couchmate:v2:client:diagnostics:screenshots"
+    requires_auth = False
+
+    async def get(self, request: web.Request) -> web.Response:
+        requester_id = await _client_id_from_request(request)
+        hass = request.app["hass"]
+        if requester_id is None:
+            return web.json_response({"error": "unauthorized"}, status=401)
+        if not _is_screenshot_controller(hass, requester_id):
+            return web.json_response({"error": "capability_required"}, status=403)
+        targets = [
+            target
+            for client in _manager(hass).list_clients()
+            if client["client_id"] != requester_id
+            and (target := _screenshot_target(hass, client["client_id"])) is not None
+        ]
+        targets.sort(key=lambda item: str(item["device_name"]).casefold())
+        return web.json_response(
+            {"targets": targets},
+            headers={"Cache-Control": "no-store"},
+        )
+
+    async def post(self, request: web.Request) -> web.Response:
+        requester_id = await _client_id_from_request(request)
+        hass = request.app["hass"]
+        if requester_id is None:
+            return web.json_response({"error": "unauthorized"}, status=401)
+        if not _is_screenshot_controller(hass, requester_id):
+            return web.json_response({"error": "capability_required"}, status=403)
+        try:
+            payload = await request.json()
+            target_client_id = str(payload.get("target_client_id", "")).strip()
+        except (ValueError, TypeError):
+            return web.json_response({"error": "invalid_json"}, status=400)
+        if not target_client_id:
+            return web.json_response({"error": "target_client_id_required"}, status=400)
+        if target_client_id == requester_id or _screenshot_target(hass, target_client_id) is None:
+            return web.json_response({"error": "target_not_found"}, status=404)
+        screenshot_request = _diagnostics(hass).create_screenshot_request(
+            requester_id,
+            target_client_id,
+        )
+        return web.json_response(
+            screenshot_request.metadata(),
+            status=201,
+            headers={"Cache-Control": "no-store"},
+        )
+
+
+class CouchMateClientDiagnosticScreenshotResultView(HomeAssistantView):
+    """Return screenshot request state or its protected image data."""
+
+    url = "/api/couchmate/v2/client/diagnostics/screenshots/{request_id}"
+    name = "api:couchmate:v2:client:diagnostics:screenshot-result"
+    requires_auth = False
+
+    async def get(self, request: web.Request, request_id: str) -> web.Response:
+        requester_id = await _client_id_from_request(request)
+        hass = request.app["hass"]
+        if requester_id is None:
+            return web.json_response({"error": "unauthorized"}, status=401)
+        if not _is_screenshot_controller(hass, requester_id):
+            return web.json_response({"error": "capability_required"}, status=403)
+        screenshot_request = _diagnostics(hass).request_for_requester(
+            request_id,
+            requester_id,
+        )
+        if screenshot_request is None:
+            return web.json_response({"error": "screenshot_not_found"}, status=404)
+        if request.query.get("download") == "1":
+            if screenshot_request.status != "ready" or screenshot_request.image_data is None:
+                return web.json_response(
+                    {"error": "screenshot_not_ready", **screenshot_request.metadata()},
+                    status=409,
+                )
+            return web.Response(
+                body=screenshot_request.image_data,
+                headers={
+                    "Content-Type": screenshot_request.content_type or "image/jpeg",
+                    "Cache-Control": "no-store",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+        return web.json_response(
+            screenshot_request.metadata(),
+            headers={"Cache-Control": "no-store"},
+        )
+
+
+class CouchMateClientDiagnosticScreenshotUploadView(HomeAssistantView):
+    """Accept a screenshot only from the Apple TV named by its request."""
+
+    url = "/api/couchmate/client/diagnostics/screenshots/{request_id}"
+    name = "api:couchmate:client:diagnostics:screenshot-upload"
+    requires_auth = False
+
+    async def put(self, request: web.Request, request_id: str) -> web.Response:
+        target_client_id = await _client_id_from_request(request)
+        if target_client_id is None:
+            return web.json_response({"error": "unauthorized"}, status=401)
+        content_type = request.content_type.lower()
+        if content_type not in {"image/jpeg", "image/png"}:
+            return web.json_response({"error": "unsupported_image"}, status=415)
+        if request.content_length is not None and request.content_length > SCREENSHOT_MAX_BYTES:
+            return web.json_response({"error": "image_too_large"}, status=413)
+        image_data = await request.read()
+        if not image_data or len(image_data) > SCREENSHOT_MAX_BYTES:
+            return web.json_response({"error": "invalid_image_size"}, status=413)
+        signature_is_valid = (
+            content_type == "image/jpeg" and image_data.startswith(b"\xff\xd8\xff")
+        ) or (
+            content_type == "image/png" and image_data.startswith(b"\x89PNG\r\n\x1a\n")
+        )
+        if not signature_is_valid:
+            return web.json_response({"error": "invalid_image"}, status=422)
+        screenshot_request = _diagnostics(request.app["hass"]).complete_screenshot_request(
+            request_id,
+            target_client_id,
+            image_data,
+            content_type,
+        )
+        if screenshot_request is None:
+            return web.json_response({"error": "screenshot_not_found"}, status=404)
+        return web.json_response(
+            screenshot_request.metadata(),
+            headers={"Cache-Control": "no-store"},
+        )
+
+
 async def async_setup_api(hass: HomeAssistant) -> None:
     for view in (
         CouchMateEntitiesView(),
@@ -872,6 +1057,9 @@ async def async_setup_api(hass: HomeAssistant) -> None:
         CouchMateClientSnapshotView(),
         CouchMateClientStreamView(),
         CouchMateClientServiceView(),
+        CouchMateClientDiagnosticScreenshotsView(),
+        CouchMateClientDiagnosticScreenshotResultView(),
+        CouchMateClientDiagnosticScreenshotUploadView(),
     ):
         hass.http.register_view(view)
     _LOGGER.info("CouchMate Core Dev Preview REST and pairing API endpoints registered")
