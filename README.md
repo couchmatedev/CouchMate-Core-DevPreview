@@ -1,14 +1,14 @@
 # CouchMate Core Dev Preview
 
-> Separater Beta-Kanal für neue CouchMate-Funktionen. Die Dev Preview verwendet ausschließlich `custom_components/couchmate_dev` und kann technisch parallel zum stabilen Core installiert werden.
+> Separater Beta-Kanal für neue CouchMate-Funktionen. Die Dev Preview verwendet bereits den endgültigen Namespace `couchmate` und wird anstelle des stabilen Core installiert, nicht parallel zum stabilen Core.
 
 Dieses Repository enthält genau eine Home-Assistant-Integration:
 
-- Ordner: `custom_components/couchmate_dev`
-- Domain: `couchmate_dev`
-- Dienste: `couchmate_dev.*`
-- API: `/api/couchmate_dev/*`
-- Lokale Daten: `couchmate_dev*`
+- Ordner: `custom_components/couchmate`
+- Domain: `couchmate`
+- Dienste: `couchmate.*`
+- API: `/api/couchmate/*`
+- Lokale Daten: `couchmate*`
 
 Der sichtbare Name bleibt **CouchMate Core Dev Preview**. Beta-Versionen können sich kurzfristig ändern und Fehler enthalten; für den regulären Betrieb bleibt der stabile Core empfohlen.
 
@@ -20,7 +20,7 @@ Der sichtbare Name bleibt **CouchMate Core Dev Preview**. Beta-Versionen können
 4. Starte Home Assistant vollständig neu.
 5. Füge unter **Einstellungen → Geräte & Dienste → Integration hinzufügen** die Integration **CouchMate Core Dev Preview** hinzu.
 
-Die Dev Preview besitzt eine eigene Domain und eigene Speicher. Kopplungen und Einstellungen des stabilen Core werden daher weder überschrieben noch automatisch übernommen.
+Die Dev Preview verwendet dieselbe endgültige Domain, dieselben API-Pfade und dieselben Speicherbezeichner wie das spätere Release. Dadurch müssen Apps, Kopplungen und Einstellungen beim Übergang vom Preview- zum Release-Repository nicht migriert werden.
 
 ## Verwaltung
 
@@ -28,15 +28,15 @@ Die Home-Assistant-Sidebar enthält die Bereiche **Geräte & Funktionen** sowie 
 
 ---
 
-> Separate beta channel for new CouchMate features. The Dev Preview uses only `custom_components/couchmate_dev` and can technically be installed alongside the stable Core.
+> Separate beta channel for new CouchMate features. The Dev Preview already uses the final `couchmate` namespace and is installed instead of the stable Core, not alongside the stable Core.
 
 This repository contains exactly one Home Assistant integration:
 
-- Folder: `custom_components/couchmate_dev`
-- Domain: `couchmate_dev`
-- Services: `couchmate_dev.*`
-- API: `/api/couchmate_dev/*`
-- Local data: `couchmate_dev*`
+- Folder: `custom_components/couchmate`
+- Domain: `couchmate`
+- Services: `couchmate.*`
+- API: `/api/couchmate/*`
+- Local data: `couchmate*`
 
 The visible name remains **CouchMate Core Dev Preview**. Beta releases may change at short notice and can contain bugs; the stable Core remains recommended for regular use.
 
@@ -48,7 +48,7 @@ The visible name remains **CouchMate Core Dev Preview**. Beta releases may chang
 4. Perform a full Home Assistant restart.
 5. Add **CouchMate Core Dev Preview** under **Settings → Devices & services → Add integration**.
 
-The Dev Preview uses its own domain and storage. Stable Core pairings and settings are neither overwritten nor imported automatically.
+The Dev Preview uses the same final domain, API routes, and storage identifiers as the later release. Apps, pairings, and settings therefore require no migration when moving from the preview repository to the release repository.
 
 ## Management
 

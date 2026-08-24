@@ -9,8 +9,8 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pages = [
-  "custom_components/couchmate_dev/configurator.py",
-  "custom_components/couchmate_dev/management.py",
+  "custom_components/couchmate/configurator.py",
+  "custom_components/couchmate/management.py",
 ];
 
 for (const relativePath of pages) {

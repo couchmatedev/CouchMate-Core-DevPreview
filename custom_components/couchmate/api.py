@@ -253,8 +253,8 @@ def _resolved_room_climate_ids(
 
 
 class CouchMateEntitiesView(HomeAssistantView):
-    url = "/api/couchmate_dev/entities"
-    name = "api:couchmate_dev:entities"
+    url = "/api/couchmate/entities"
+    name = "api:couchmate:entities"
     requires_auth = True
 
     async def get(self, request: web.Request) -> web.Response:
@@ -293,15 +293,15 @@ class CouchMateEntitiesView(HomeAssistantView):
 
 
 class CouchMateInfoView(HomeAssistantView):
-    url = "/api/couchmate_dev/info"
-    name = "api:couchmate_dev:info"
+    url = "/api/couchmate/info"
+    name = "api:couchmate:info"
     requires_auth = True
 
     async def get(self, request: web.Request) -> web.Response:
         hass = request.app["hass"]
         return web.json_response({
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.4.0-beta.7",
+            "version": "1.4.0-beta.8",
             "domain": DOMAIN,
             "filtered_entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
             "pairing": True,
@@ -310,8 +310,8 @@ class CouchMateInfoView(HomeAssistantView):
 
 
 class PairingCreateView(HomeAssistantView):
-    url = "/api/couchmate_dev/pairing/create"
-    name = "api:couchmate_dev:pairing:create"
+    url = "/api/couchmate/pairing/create"
+    name = "api:couchmate:pairing:create"
     requires_auth = False
 
     async def post(self, request: web.Request) -> web.Response:
@@ -352,8 +352,8 @@ class PairingCreateView(HomeAssistantView):
 
 
 class PairingStatusView(HomeAssistantView):
-    url = "/api/couchmate_dev/pairing/status"
-    name = "api:couchmate_dev:pairing:status"
+    url = "/api/couchmate/pairing/status"
+    name = "api:couchmate:pairing:status"
     requires_auth = False
 
     async def get(self, request: web.Request) -> web.Response:
@@ -368,8 +368,8 @@ class PairingStatusView(HomeAssistantView):
 
 
 class PairingApproveView(HomeAssistantView):
-    url = "/api/couchmate_dev/pairing/approve"
-    name = "api:couchmate_dev:pairing:approve"
+    url = "/api/couchmate/pairing/approve"
+    name = "api:couchmate:pairing:approve"
     requires_auth = True
 
     async def post(self, request: web.Request) -> web.Response:
@@ -388,8 +388,8 @@ class PairingApproveView(HomeAssistantView):
 
 
 class PairingExchangeView(HomeAssistantView):
-    url = "/api/couchmate_dev/pairing/exchange"
-    name = "api:couchmate_dev:pairing:exchange"
+    url = "/api/couchmate/pairing/exchange"
+    name = "api:couchmate:pairing:exchange"
     requires_auth = False
 
     async def post(self, request: web.Request) -> web.Response:
@@ -412,8 +412,8 @@ async def _client_id_from_request(request: web.Request) -> str | None:
 
 
 class PairingCancelView(HomeAssistantView):
-    url = "/api/couchmate_dev/pairing/cancel"
-    name = "api:couchmate_dev:pairing:cancel"
+    url = "/api/couchmate/pairing/cancel"
+    name = "api:couchmate:pairing:cancel"
     requires_auth = False
 
     async def post(self, request: web.Request) -> web.Response:
@@ -433,8 +433,8 @@ class PairingCancelView(HomeAssistantView):
 
 
 class CouchMateClientInfoView(HomeAssistantView):
-    url = "/api/couchmate_dev/client/info"
-    name = "api:couchmate_dev:client:info"
+    url = "/api/couchmate/client/info"
+    name = "api:couchmate:client:info"
     requires_auth = False
 
     async def get(self, request: web.Request) -> web.Response:
@@ -445,15 +445,15 @@ class CouchMateClientInfoView(HomeAssistantView):
         return web.json_response({
             "client_id": client_id,
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.4.0-beta.7",
+            "version": "1.4.0-beta.8",
             "status": "active",
             "entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
         })
 
 
 class CouchMateClientEntitiesView(HomeAssistantView):
-    url = "/api/couchmate_dev/client/entities"
-    name = "api:couchmate_dev:client:entities"
+    url = "/api/couchmate/client/entities"
+    name = "api:couchmate:client:entities"
     requires_auth = False
 
     async def get(self, request: web.Request) -> web.Response:
@@ -671,8 +671,8 @@ class CouchMateClientEntitiesView(HomeAssistantView):
 class CouchMateClientSnapshotView(HomeAssistantView):
     """Serve one selected Home Assistant camera/image to a paired client."""
 
-    url = "/api/couchmate_dev/client/snapshot/{entity_id}"
-    name = "api:couchmate_dev:client:snapshot"
+    url = "/api/couchmate/client/snapshot/{entity_id}"
+    name = "api:couchmate:client:snapshot"
     requires_auth = False
 
     async def get(self, request: web.Request, entity_id: str) -> web.Response:
@@ -730,8 +730,8 @@ class CouchMateClientSnapshotView(HomeAssistantView):
 class CouchMateClientStreamView(HomeAssistantView):
     """Start one selected camera's tokenized Home Assistant HLS stream."""
 
-    url = "/api/couchmate_dev/client/stream/{entity_id}"
-    name = "api:couchmate_dev:client:stream"
+    url = "/api/couchmate/client/stream/{entity_id}"
+    name = "api:couchmate:client:stream"
     requires_auth = False
 
     async def post(self, request: web.Request, entity_id: str) -> web.Response:
@@ -797,8 +797,8 @@ _ALLOWED_SERVICES: dict[str, set[str]] = {
 
 
 class CouchMateClientServiceView(HomeAssistantView):
-    url = "/api/couchmate_dev/client/service"
-    name = "api:couchmate_dev:client:service"
+    url = "/api/couchmate/client/service"
+    name = "api:couchmate:client:service"
     requires_auth = False
 
     async def post(self, request: web.Request) -> web.Response:

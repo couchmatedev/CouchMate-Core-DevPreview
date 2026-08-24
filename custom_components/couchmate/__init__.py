@@ -103,8 +103,8 @@ from .management import async_setup_management
 
 _LOGGER = logging.getLogger(__name__)
 
-PANEL_URL_PATH = "couchmate_dev"
-PANEL_CONFIGURATOR_URL = "/couchmate_dev/configurator"
+PANEL_URL_PATH = "couchmate"
+PANEL_CONFIGURATOR_URL = "/couchmate/configurator"
 
 
 
@@ -325,7 +325,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Delete persisted storage when the user removes the integration.
 
-    Without this, the entity-selection list at `.storage/couchmate_dev`
+    Without this, the entity-selection list at `.storage/couchmate`
     survives the deletion. The next time the user re-adds Couch
     Core Dev Preview config flow loads that file and pre-populates the
     form with the old entities — which is what made the integration
@@ -419,7 +419,7 @@ async def _async_setup_services(hass: HomeAssistant) -> None:
         orphaned config entry and the persisted storage file behind.
         Running this service first triggers the normal HA removal
         path (which calls our `async_remove_entry`, which deletes
-        `.storage/couchmate_dev`), so the subsequent HACS file
+        `.storage/couchmate`), so the subsequent HACS file
         deletion has nothing to mop up.
         """
         entry = hass.data.get(DOMAIN, {}).get("entry")

@@ -1,7 +1,7 @@
 """Private, local home and room-background storage for CouchMate.
 
 Uploaded originals are validated and transformed in memory.  Only metadata-free
-JPEG variants are persisted below ``/config/couchmate_dev/backgrounds``; the source
+JPEG variants are persisted below ``/config/couchmate/backgrounds``; the source
 image is never retained.  Pillow is deliberately imported inside the executor
 job so importing or starting CouchMate does not depend on Pillow being present.
 """
@@ -37,7 +37,7 @@ MIN_IMAGE_WIDTH = 1280
 MIN_IMAGE_HEIGHT = 720
 
 BACKGROUND_SCHEMA_VERSION = 1
-BACKGROUND_DIRECTORY = ("couchmate_dev", "backgrounds")
+BACKGROUND_DIRECTORY = ("couchmate", "backgrounds")
 # Global image assets are never represented by a synthetic area id.  The
 # fixed directory name cannot collide with an area's 32-character hex digest,
 # including when a real Home Assistant area happens to be named ``home``.

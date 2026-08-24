@@ -185,9 +185,9 @@ def _public_background(
         return None
     if admin:
         preview_base = (
-            "/api/couchmate_dev/v2/admin/home-background"
+            "/api/couchmate/v2/admin/home-background"
             if area_id is None
-            else "/api/couchmate_dev/v2/admin/backgrounds/"
+            else "/api/couchmate/v2/admin/backgrounds/"
             f"{quote(area_id, safe='')}"
         )
     elif area_id is None:
@@ -201,7 +201,7 @@ def _public_background(
         url = (
             f"{preview_base}?variant={quote(name, safe='')}"
             if admin
-            else "/api/couchmate_dev/v2/client/backgrounds/"
+            else "/api/couchmate/v2/client/backgrounds/"
             f"{quote(area_id, safe='')}/{revision}/{quote(name, safe='')}"
         )
         public_variants[name] = {
@@ -315,8 +315,8 @@ def _client_response(request: web.Request, client_id: str) -> web.Response:
 
 
 class V2ClientConfigurationView(HomeAssistantView):
-    url = "/api/couchmate_dev/v2/client/configuration"
-    name = "api:couchmate_dev:v2:client:configuration"
+    url = "/api/couchmate/v2/client/configuration"
+    name = "api:couchmate:v2:client:configuration"
     requires_auth = False
 
     async def get(self, request):
@@ -325,8 +325,8 @@ class V2ClientConfigurationView(HomeAssistantView):
 
 
 class V2ClientProfilesView(HomeAssistantView):
-    url = "/api/couchmate_dev/v2/client/profiles"
-    name = "api:couchmate_dev:v2:client:profiles"
+    url = "/api/couchmate/v2/client/profiles"
+    name = "api:couchmate:v2:client:profiles"
     requires_auth = False
 
     async def get(self, request):
@@ -337,8 +337,8 @@ class V2ClientProfilesView(HomeAssistantView):
 
 
 class V2ClientProfileView(HomeAssistantView):
-    url = "/api/couchmate_dev/v2/client/profile"
-    name = "api:couchmate_dev:v2:client:profile"
+    url = "/api/couchmate/v2/client/profile"
+    name = "api:couchmate:v2:client:profile"
     requires_auth = False
 
     async def put(self, request):
@@ -359,8 +359,8 @@ class V2ClientProfileView(HomeAssistantView):
 
 
 class V2ClientSettingsView(HomeAssistantView):
-    url = "/api/couchmate_dev/v2/client/settings"
-    name = "api:couchmate_dev:v2:client:settings"
+    url = "/api/couchmate/v2/client/settings"
+    name = "api:couchmate:v2:client:settings"
     requires_auth = False
 
     async def put(self, request):
@@ -524,8 +524,8 @@ async def _store_home_background(request: web.Request) -> web.Response:
 
 
 class V2ClientBackgroundView(HomeAssistantView):
-    url = "/api/couchmate_dev/v2/client/backgrounds/{area_id}/{revision}/{variant}"
-    name = "api:couchmate_dev:v2:client:background"
+    url = "/api/couchmate/v2/client/backgrounds/{area_id}/{revision}/{variant}"
+    name = "api:couchmate:v2:client:background"
     requires_auth = False
 
     async def get(
@@ -551,8 +551,8 @@ class V2ClientBackgroundView(HomeAssistantView):
 
 
 class V2ClientBackgroundMutationView(HomeAssistantView):
-    url = "/api/couchmate_dev/v2/client/backgrounds/{area_id}"
-    name = "api:couchmate_dev:v2:client:background:mutation"
+    url = "/api/couchmate/v2/client/backgrounds/{area_id}"
+    name = "api:couchmate:v2:client:background:mutation"
     requires_auth = False
 
     async def put(self, request, area_id: str):
@@ -634,8 +634,8 @@ def _admin_snapshot(hass) -> dict[str, Any]:
 class V2AdminPairingRequestsView(HomeAssistantView):
     """List pairing requests that are still awaiting an administrator."""
 
-    url = "/api/couchmate_dev/v2/admin/pairing-requests"
-    name = "api:couchmate_dev:v2:admin:pairing_requests"
+    url = "/api/couchmate/v2/admin/pairing-requests"
+    name = "api:couchmate:v2:admin:pairing_requests"
     requires_auth = True
 
     async def get(self, request):
@@ -655,8 +655,8 @@ class V2AdminPairingRequestsView(HomeAssistantView):
 class V2AdminPairingApproveView(HomeAssistantView):
     """Approve exactly one still-pending pairing request."""
 
-    url = "/api/couchmate_dev/v2/admin/pairing-requests/{session_id}/approve"
-    name = "api:couchmate_dev:v2:admin:pairing_request:approve"
+    url = "/api/couchmate/v2/admin/pairing-requests/{session_id}/approve"
+    name = "api:couchmate:v2:admin:pairing_request:approve"
     requires_auth = True
 
     async def post(self, request, session_id: str):
@@ -686,8 +686,8 @@ class V2AdminPairingApproveView(HomeAssistantView):
 class V2AdminPairingRejectView(HomeAssistantView):
     """Reject exactly one still-pending pairing request."""
 
-    url = "/api/couchmate_dev/v2/admin/pairing-requests/{session_id}/reject"
-    name = "api:couchmate_dev:v2:admin:pairing_request:reject"
+    url = "/api/couchmate/v2/admin/pairing-requests/{session_id}/reject"
+    name = "api:couchmate:v2:admin:pairing_request:reject"
     requires_auth = True
 
     async def post(self, request, session_id: str):
@@ -715,8 +715,8 @@ class V2AdminPairingRejectView(HomeAssistantView):
 
 
 class V2AdminConfigurationView(HomeAssistantView):
-    url = "/api/couchmate_dev/v2/admin/configuration"
-    name = "api:couchmate_dev:v2:admin:configuration"
+    url = "/api/couchmate/v2/admin/configuration"
+    name = "api:couchmate:v2:admin:configuration"
     requires_auth = True
 
     async def get(self, request):
@@ -740,8 +740,8 @@ class V2AdminConfigurationView(HomeAssistantView):
 
 
 class V2AdminProfilesView(HomeAssistantView):
-    url = "/api/couchmate_dev/v2/admin/profiles"
-    name = "api:couchmate_dev:v2:admin:profiles"
+    url = "/api/couchmate/v2/admin/profiles"
+    name = "api:couchmate:v2:admin:profiles"
     requires_auth = True
 
     async def post(self, request):
@@ -759,8 +759,8 @@ class V2AdminProfilesView(HomeAssistantView):
 
 
 class V2AdminProfileView(HomeAssistantView):
-    url = "/api/couchmate_dev/v2/admin/profiles/{profile_id}"
-    name = "api:couchmate_dev:v2:admin:profile"
+    url = "/api/couchmate/v2/admin/profiles/{profile_id}"
+    name = "api:couchmate:v2:admin:profile"
     requires_auth = True
 
     async def patch(self, request, profile_id: str):
@@ -794,8 +794,8 @@ class V2AdminProfileView(HomeAssistantView):
 
 
 class V2AdminClientProfileView(HomeAssistantView):
-    url = "/api/couchmate_dev/v2/admin/clients/{client_id}/profile"
-    name = "api:couchmate_dev:v2:admin:client:profile"
+    url = "/api/couchmate/v2/admin/clients/{client_id}/profile"
+    name = "api:couchmate:v2:admin:client:profile"
     requires_auth = True
 
     async def put(self, request, client_id: str):
@@ -818,8 +818,8 @@ class V2AdminClientProfileView(HomeAssistantView):
 class V2AdminClientView(HomeAssistantView):
     """Rename or revoke one paired Apple TV or Companion App."""
 
-    url = "/api/couchmate_dev/v2/admin/clients/{client_id}"
-    name = "api:couchmate_dev:v2:admin:client"
+    url = "/api/couchmate/v2/admin/clients/{client_id}"
+    name = "api:couchmate:v2:admin:client"
     requires_auth = True
 
     async def patch(self, request, client_id: str):
@@ -860,8 +860,8 @@ class V2AdminClientView(HomeAssistantView):
 class V2AdminHomeBackgroundView(HomeAssistantView):
     """Manage the private background inherited by rooms without an override."""
 
-    url = "/api/couchmate_dev/v2/admin/home-background"
-    name = "api:couchmate_dev:v2:admin:home_background"
+    url = "/api/couchmate/v2/admin/home-background"
+    name = "api:couchmate:v2:admin:home_background"
     requires_auth = True
 
     async def get(self, request):
@@ -893,8 +893,8 @@ class V2AdminHomeBackgroundView(HomeAssistantView):
 
 
 class V2AdminBackgroundView(HomeAssistantView):
-    url = "/api/couchmate_dev/v2/admin/backgrounds/{area_id}"
-    name = "api:couchmate_dev:v2:admin:background"
+    url = "/api/couchmate/v2/admin/backgrounds/{area_id}"
+    name = "api:couchmate:v2:admin:background"
     requires_auth = True
 
     async def get(self, request, area_id: str):

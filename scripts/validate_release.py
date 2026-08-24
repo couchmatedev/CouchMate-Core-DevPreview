@@ -19,55 +19,55 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENTS = ROOT / "custom_components"
-PACKAGE = COMPONENTS / "couchmate_dev"
-EXPECTED_VERSION = "1.4.0-beta.7"
+PACKAGE = COMPONENTS / "couchmate"
+EXPECTED_VERSION = "1.4.0-beta.8"
 EXPECTED_BRAND = "CouchMate Core Dev Preview"
 FORBIDDEN_NAMESPACES = (
-    "/api/couchmate/",
-    "api:couchmate:",
-    '"domain": "couchmate"',
+    "/api/couchmate_dev/",
+    "api:couchmate_dev:",
+    '"domain": "couchmate_dev"',
 )
 
 REQUIRED_V1_VIEWS = {
     "CouchMateEntitiesView": (
-        "/api/couchmate_dev/entities",
-        "api:couchmate_dev:entities",
+        "/api/couchmate/entities",
+        "api:couchmate:entities",
     ),
     "CouchMateInfoView": (
-        "/api/couchmate_dev/info",
-        "api:couchmate_dev:info",
+        "/api/couchmate/info",
+        "api:couchmate:info",
     ),
     "PairingCreateView": (
-        "/api/couchmate_dev/pairing/create",
-        "api:couchmate_dev:pairing:create",
+        "/api/couchmate/pairing/create",
+        "api:couchmate:pairing:create",
     ),
     "PairingStatusView": (
-        "/api/couchmate_dev/pairing/status",
-        "api:couchmate_dev:pairing:status",
+        "/api/couchmate/pairing/status",
+        "api:couchmate:pairing:status",
     ),
     "PairingApproveView": (
-        "/api/couchmate_dev/pairing/approve",
-        "api:couchmate_dev:pairing:approve",
+        "/api/couchmate/pairing/approve",
+        "api:couchmate:pairing:approve",
     ),
     "PairingExchangeView": (
-        "/api/couchmate_dev/pairing/exchange",
-        "api:couchmate_dev:pairing:exchange",
+        "/api/couchmate/pairing/exchange",
+        "api:couchmate:pairing:exchange",
     ),
     "PairingCancelView": (
-        "/api/couchmate_dev/pairing/cancel",
-        "api:couchmate_dev:pairing:cancel",
+        "/api/couchmate/pairing/cancel",
+        "api:couchmate:pairing:cancel",
     ),
     "CouchMateClientInfoView": (
-        "/api/couchmate_dev/client/info",
-        "api:couchmate_dev:client:info",
+        "/api/couchmate/client/info",
+        "api:couchmate:client:info",
     ),
     "CouchMateClientEntitiesView": (
-        "/api/couchmate_dev/client/entities",
-        "api:couchmate_dev:client:entities",
+        "/api/couchmate/client/entities",
+        "api:couchmate:client:entities",
     ),
     "CouchMateClientServiceView": (
-        "/api/couchmate_dev/client/service",
-        "api:couchmate_dev:client:service",
+        "/api/couchmate/client/service",
+        "api:couchmate:client:service",
     ),
 }
 
@@ -120,22 +120,18 @@ def module_constants(path: Path) -> dict[str, Any]:
 
 def check_layout_and_metadata() -> None:
     """Verify HACS installs exactly one canonical-domain package."""
-    require(PACKAGE.is_dir(), "missing custom_components/couchmate_dev package")
-    require(
-        not (COMPONENTS / "couchmate").exists(),
-        "custom_components/couchmate must not be shipped in the Dev Preview repository",
-    )
+    require(PACKAGE.is_dir(), "missing custom_components/couchmate package")
     component_dirs = sorted(
         path.name for path in COMPONENTS.iterdir() if path.is_dir()
     )
     require(
-        component_dirs == ["couchmate_dev"],
+        component_dirs == ["couchmate"],
         f"unexpected custom component directories: {component_dirs}",
     )
 
     manifest = json.loads((PACKAGE / "manifest.json").read_text(encoding="utf-8"))
     hacs = json.loads((ROOT / "hacs.json").read_text(encoding="utf-8"))
-    require(manifest.get("domain") == "couchmate_dev", "manifest domain must be couchmate_dev")
+    require(manifest.get("domain") == "couchmate", "manifest domain must be couchmate")
     require(manifest.get("name") == EXPECTED_BRAND, "manifest must keep Dev Preview branding")
     require(manifest.get("version") == EXPECTED_VERSION, "manifest version is inconsistent")
     require(hacs.get("name") == EXPECTED_BRAND, "hacs.json must keep Dev Preview branding")
@@ -143,19 +139,19 @@ def check_layout_and_metadata() -> None:
 
     constants = module_constants(PACKAGE / "const.py")
     expected_constants = {
-        "DOMAIN": "couchmate_dev",
-        "STORAGE_KEY": "couchmate_dev",
-        "PAIRING_CLIENT_STORAGE_KEY": "couchmate_dev.paired_clients",
-        "CONFIGURATION_STORAGE_KEY": "couchmate_dev.configuration",
-        "BACKGROUND_DIRECTORY": "couchmate_dev/backgrounds",
+        "DOMAIN": "couchmate",
+        "STORAGE_KEY": "couchmate",
+        "PAIRING_CLIENT_STORAGE_KEY": "couchmate.paired_clients",
+        "CONFIGURATION_STORAGE_KEY": "couchmate.configuration",
+        "BACKGROUND_DIRECTORY": "couchmate/backgrounds",
     }
     for key, value in expected_constants.items():
         require(constants.get(key) == value, f"{key} must be {value!r}")
 
     init_constants = module_constants(PACKAGE / "__init__.py")
-    require(init_constants.get("PANEL_URL_PATH") == "couchmate_dev", "panel path must be couchmate_dev")
+    require(init_constants.get("PANEL_URL_PATH") == "couchmate", "panel path must be couchmate")
     require(
-        init_constants.get("PANEL_CONFIGURATOR_URL") == "/couchmate_dev/configurator",
+        init_constants.get("PANEL_CONFIGURATOR_URL") == "/couchmate/configurator",
         "panel configurator URL must use the Dev Preview namespace",
     )
 
@@ -281,12 +277,12 @@ def check_http_views() -> None:
 
     for class_name, (url, name, path) in views.items():
         require(
-            url in {"/couchmate_dev/configurator", "/couchmate_dev/management"}
-            or url.startswith("/api/couchmate_dev/"),
+            url in {"/couchmate/configurator", "/couchmate/management"}
+            or url.startswith("/api/couchmate/"),
             f"non-canonical URL in {path}:{class_name}: {url}",
         )
         require(
-            name.startswith("api:couchmate_dev:") or name.startswith("couchmate_dev:"),
+            name.startswith("api:couchmate:") or name.startswith("couchmate:"),
             f"non-canonical view name in {path}:{class_name}: {name}",
         )
 
@@ -339,10 +335,10 @@ def check_readme_release_scope() -> None:
     """Verify that the README documents the separate Dev Preview package."""
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     required_guidance = (
-        "custom_components/couchmate_dev",
-        "Domain: `couchmate_dev`",
-        "parallel zum stabilen Core",
-        "alongside the stable Core",
+        "custom_components/couchmate",
+        "Domain: `couchmate`",
+        "nicht parallel zum stabilen Core",
+        "not alongside the stable Core",
     )
     for phrase in required_guidance:
         require(phrase in readme, f"README is missing Dev Preview guidance: {phrase!r}")
