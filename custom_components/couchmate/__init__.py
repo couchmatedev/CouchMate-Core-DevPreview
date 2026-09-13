@@ -219,6 +219,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN]["weather_entity"] = stored_weather_entity
         hass.data[DOMAIN]["selection_model"] = stored_selection_model if stored_selection_model.get("version") == SELECTION_MODEL_VERSION else {"version": SELECTION_MODEL_VERSION, "areas": {}}
         hass.data[DOMAIN]["entry"] = entry
+        hass.data[DOMAIN]["entry_options"] = dict(entry.options)
 
         await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR])
 
@@ -285,7 +286,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return False
 
         # Add update listener
-        entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+        entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
 
         _LOGGER.info("CouchMate Core Dev Preview setup completed successfully")
         return True
@@ -374,6 +375,32 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         await pairing_store.async_remove()
     except Exception:
         _LOGGER.exception("Error removing CouchMate paired-client storage")
+
+
+async def _async_entry_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Keep the configurator open when its saved selection is already applied."""
+    runtime = hass.data.get(DOMAIN, {})
+    applied_selection = {
+        CONF_AREAS: runtime.get("areas"),
+        CONF_DEVICES: runtime.get("devices"),
+        CONF_ENTITIES: runtime.get("explicit_entities"),
+        CONF_EXCLUDED_ENTITIES: runtime.get("excluded_entities"),
+        CONF_ROOM_TEMPERATURES: runtime.get("room_temperatures"),
+        CONF_ROOM_HUMIDITIES: runtime.get("room_humidities"),
+        CONF_ROOM_CLIMATES: runtime.get("room_climates"),
+        CONF_WEATHER_ENTITY: runtime.get("weather_entity"),
+        CONF_SELECTION_MODEL: runtime.get("selection_model"),
+    }
+    if (
+        runtime.get("entry") is entry
+        and runtime.get("entry_options") == dict(entry.options)
+        and dict(entry.data) == applied_selection
+    ):
+        # The configurator has already persisted and applied these values.
+        # Reloading would briefly remove its sidebar panel and make Home
+        # Assistant navigate away from the room currently being edited.
+        return
+    await async_reload_entry(hass, entry)
 
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

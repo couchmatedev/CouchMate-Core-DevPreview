@@ -25,6 +25,7 @@ from homeassistant.helpers import entity_registry as er
 
 from .const import CONFIGURATION_MANAGER, DIAGNOSTICS_MANAGER, DOMAIN, PAIRING_MANAGER
 from .diagnostics import DiagnosticsManager, SCREENSHOT_MAX_BYTES
+from .flow import flow_modes_for_selection
 from .pairing import PairingManager, PairingStatus
 from .storage import async_save_entities
 
@@ -321,7 +322,7 @@ class CouchMateInfoView(HomeAssistantView):
         hass = request.app["hass"]
         return web.json_response({
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.4.0-beta.12",
+            "version": "1.4.0-beta.14",
             "domain": DOMAIN,
             "filtered_entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
             "pairing": True,
@@ -467,7 +468,7 @@ class CouchMateClientInfoView(HomeAssistantView):
         return web.json_response({
             "client_id": client_id,
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.4.0-beta.12",
+            "version": "1.4.0-beta.14",
             "status": "active",
             "entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
         })
@@ -509,6 +510,11 @@ class CouchMateClientEntitiesView(HomeAssistantView):
             str(area_id): [str(entity_id) for entity_id in area_cfg.get("hero_order", [])]
             for area_id, area_cfg in dict(selection_model.get("areas", {})).items()
             if isinstance(area_cfg, dict) and isinstance(area_cfg.get("hero_order"), list)
+        }
+        hero_right_entity_order = {
+            str(area_id): list(area_cfg["hero_right_entities"])
+            for area_id, area_cfg in dict(selection_model.get("areas", {})).items()
+            if isinstance(area_cfg, dict) and isinstance(area_cfg.get("hero_right_entities"), list)
         }
         flow_entity_order = {
             str(area_id): [
@@ -679,7 +685,9 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                 "room_humidities": room_humidities,
                 "room_climate_entity_ids": room_climate_ids,
                 "hero_entity_order": hero_entity_order,
+                "hero_right_entity_order": hero_right_entity_order,
                 "flow_entity_order": flow_entity_order,
+                "flow_modes": flow_modes_for_selection(selection_model),
                 "hero_layout_version": 1,
                 "hero_layouts": hero_layouts,
                 "thermostat_card_style": thermostat_card_style,

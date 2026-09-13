@@ -20,7 +20,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENTS = ROOT / "custom_components"
 PACKAGE = COMPONENTS / "couchmate"
-EXPECTED_VERSION = "1.4.0-beta.11"
+EXPECTED_VERSION = "1.4.0-beta.14"
 EXPECTED_BRAND = "CouchMate Core Dev Preview"
 FORBIDDEN_NAMESPACES = (
     "/api/couchmate_dev/",
@@ -267,7 +267,7 @@ def check_http_views() -> None:
             views[node.name] = (url, name, relative(path))
             view_nodes[node.name] = node
 
-    require(len(views) == 35, f"expected 35 HTTP views, found {len(views)}")
+    require(len(views) == 36, f"expected 36 HTTP views, found {len(views)}")
     urls = [item[0] for item in views.values()]
     names = [item[1] for item in views.values()]
     duplicate_urls = sorted(value for value, count in Counter(urls).items() if count > 1)
@@ -293,6 +293,33 @@ def check_http_views() -> None:
             actual[:2] == expected,
             f"required v1 view {class_name} changed: expected {expected}, found {actual[:2]}",
         )
+
+    layout_view = views.get("V2ClientDashboardLayoutView")
+    require(
+        layout_view is not None and layout_view[:2] == (
+            "/api/couchmate/v2/client/dashboard-layout",
+            "api:couchmate:v2:client:dashboard-layout",
+        ),
+        "tvOS remote arrangement requires the canonical dashboard-layout API",
+    )
+    layout_methods = {
+        item.name for item in view_nodes["V2ClientDashboardLayoutView"].body
+        if isinstance(item, ast.AsyncFunctionDef)
+    }
+    require({"get", "put"}.issubset(layout_methods), "dashboard-layout must support GET and PUT")
+    pairing_tree = ast.parse((PACKAGE / "pairing.py").read_text(encoding="utf-8"))
+    allowed_capabilities = set()
+    for item in pairing_tree.body:
+        if (isinstance(item, ast.AnnAssign)
+            and isinstance(item.target, ast.Name)
+            and item.target.id == "_ALLOWED_CLIENT_CAPABILITIES"
+            and isinstance(item.value, ast.Call)
+            and item.value.args):
+            allowed_capabilities = ast.literal_eval(item.value.args[0])
+    require(
+        "dashboard:write" in allowed_capabilities,
+        "pairing must preserve the explicitly approved dashboard:write capability",
+    )
 
     # Home Assistant dispatches path placeholders as keyword arguments:
     # ``handler(request, **request.match_info)``. A handler that omits one of
@@ -361,7 +388,7 @@ def main() -> int:
         return 1
     print(
         "release validation: PASS "
-        f"({EXPECTED_BRAND}, {EXPECTED_VERSION}, 35 unique HTTP views)"
+        f"({EXPECTED_BRAND}, {EXPECTED_VERSION}, 36 unique HTTP views)"
     )
     return 0
 
