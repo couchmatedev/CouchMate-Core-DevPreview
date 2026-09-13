@@ -321,7 +321,7 @@ class CouchMateInfoView(HomeAssistantView):
         hass = request.app["hass"]
         return web.json_response({
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.4.0-beta.11",
+            "version": "1.4.0-beta.12",
             "domain": DOMAIN,
             "filtered_entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
             "pairing": True,
@@ -352,6 +352,8 @@ class PairingCreateView(HomeAssistantView):
         requested_rights = []
         if "configuration:write" in session.capabilities:
             requested_rights.append("Profile und Dashboard-Einstellungen ändern")
+        if "dashboard:write" in session.capabilities:
+            requested_rights.append("Dashboard-Kacheln im zugewiesenen Profil anordnen")
         if "backgrounds:write" in session.capabilities:
             requested_rights.append("Raumbilder hochladen und entfernen")
         rights_notice = (
@@ -465,7 +467,7 @@ class CouchMateClientInfoView(HomeAssistantView):
         return web.json_response({
             "client_id": client_id,
             "integration": "CouchMate Core Dev Preview",
-            "version": "1.4.0-beta.11",
+            "version": "1.4.0-beta.12",
             "status": "active",
             "entities_count": len(hass.data.get(DOMAIN, {}).get("entities", [])),
         })

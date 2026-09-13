@@ -26,6 +26,14 @@ Die Dev Preview verwendet dieselbe endgültige Domain, dieselben API-Pfade und d
 
 Die Home-Assistant-Sidebar enthält die Bereiche **Geräte & Funktionen** sowie **Apple TVs & Design**. Dort können Räume, Geräte, Sensorquellen, Hero-Karten, Profile, gekoppelte Geräte und Hintergründe verwaltet werden.
 
+### Dashboard-Kacheln synchronisieren · 1.4.0-beta.12
+
+Apple TVs können die Reihenfolge von Räumen und Widgets je Raum im zugewiesenen Core-Profil speichern. Apple TVs mit demselben Profil lesen dieselbe Anordnung; separate Profile bleiben unabhängig. Die Reihenfolge bleibt nach einem Core-Neustart erhalten. Neue Kacheln ohne gespeicherten Eintrag werden von den Apps an die bestehende Reihenfolge angehängt.
+
+Die Kopplung muss das Recht **Dashboard-Kacheln anordnen** (`dashboard:write`) anfordern und ein Home-Assistant-Administrator muss es bestätigen. Bereits gekoppelte Apple TVs ohne dieses Recht müssen erneut gekoppelt werden, um Änderungen zu speichern. Vorhandenes `configuration:write` berechtigt ebenfalls zum Anordnen. Das schmale `dashboard:write` erlaubt weder allgemeine Profileinstellungen noch Profilzuweisungen oder Hintergrundänderungen.
+
+Der [API-Vertrag](docs/dashboard-layout-api.md) beschreibt Abruf, Konfliktbehandlung und gezielte Änderungen. Lokale Prüfung: `python3 -B scripts/test_dashboard_layout.py` und `python3 -B scripts/validate_release.py`.
+
 ---
 
 > Separate beta channel for new CouchMate features. The Dev Preview already uses the final `couchmate` namespace and is installed instead of the stable Core, not alongside the stable Core.

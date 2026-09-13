@@ -398,6 +398,8 @@ class CouchMateOptionsFlow(_SelectionMixin, config_entries.OptionsFlow):
             rights = []
             if "configuration:write" in session.capabilities:
                 rights.append("Profile & Einstellungen")
+            if "dashboard:write" in session.capabilities:
+                rights.append("Dashboard-Kacheln anordnen")
             if "backgrounds:write" in session.capabilities:
                 rights.append("Raumbilder")
             rights_label = f" · Rechte: {', '.join(rights)}" if rights else ""

@@ -21,7 +21,7 @@ from .const import (
 
 _CODE_ALPHABET: Final[str] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _ALLOWED_CLIENT_CAPABILITIES: Final[frozenset[str]] = frozenset(
-    {"configuration:write", "backgrounds:write"}
+    {"configuration:write", "backgrounds:write", "dashboard:write"}
 )
 
 

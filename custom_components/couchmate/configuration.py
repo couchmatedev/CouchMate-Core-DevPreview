@@ -49,6 +49,8 @@ _MAX_KEY_LENGTH = 256
 _MAX_STRING_LENGTH = 256 * 1024
 _MAX_PROFILE_NAME_LENGTH = 80
 _MAX_IDENTIFIER_LENGTH = 256
+_MAX_DASHBOARD_ORDER_ITEMS = 2048
+_MAX_DASHBOARD_ROOMS = 256
 _PROFILE_SLUG_RE = re.compile(r"[^a-z0-9]+")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
@@ -108,7 +110,49 @@ def _default_profile() -> dict[str, Any]:
         "name": DEFAULT_PROFILE_NAME,
         "revision": 0,
         "settings": {},
+        "dashboard_layout": _default_dashboard_layout(),
     }
+
+
+def _default_dashboard_layout() -> dict[str, Any]:
+    return {"room_order": [], "widget_orders": {}}
+
+
+def _dashboard_order(value: Any, *, path: str) -> list[str]:
+    """Validate bounded, opaque stable IDs without changing their identity."""
+    if not isinstance(value, list):
+        raise ValidationError("must be an array", path=path)
+    if len(value) > _MAX_DASHBOARD_ORDER_ITEMS:
+        raise ValidationError("contains too many tiles", path=path)
+    seen: set[str] = set()
+    for index, item in enumerate(value):
+        identifier = _require_identifier(item, field=f"{path}[{index}]")
+        if identifier != item:
+            raise ValidationError("must not have surrounding whitespace", path=path)
+        if identifier in seen:
+            raise ValidationError("tile IDs must be unique", path=path)
+        seen.add(identifier)
+    return list(value)
+
+
+def _validate_dashboard_layout(value: Any, *, path: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValidationError("must be an object", path=path)
+    if set(value) - {"room_order", "widget_orders"}:
+        raise ValidationError("contains unsupported fields", path=path)
+    room_order = _dashboard_order(value.get("room_order", []), path=f"{path}.room_order")
+    widget_orders = value.get("widget_orders", {})
+    if not isinstance(widget_orders, dict):
+        raise ValidationError("must be an object", path=f"{path}.widget_orders")
+    if len(widget_orders) > _MAX_DASHBOARD_ROOMS:
+        raise ValidationError("contains too many rooms", path=f"{path}.widget_orders")
+    normalized_orders = {}
+    for room_id, order in widget_orders.items():
+        normalized_room = _require_identifier(room_id, field=f"{path}.widget_orders key")
+        if normalized_room != room_id:
+            raise ValidationError("room IDs must not have surrounding whitespace", path=path)
+        normalized_orders[room_id] = _dashboard_order(order, path=f"{path}.widget_orders.{room_id}")
+    return {"room_order": room_order, "widget_orders": normalized_orders}
 
 
 def _default_document() -> dict[str, Any]:
@@ -413,6 +457,12 @@ def _validate_document(value: Any) -> dict[str, Any]:
                 "must be an object",
                 path=f"configuration.profiles.{profile_id}.settings",
             )
+        # Additive migration: keep tile order outside replaceable settings so
+        # old clients cannot accidentally remove it with a settings update.
+        profile["dashboard_layout"] = _validate_dashboard_layout(
+            profile.get("dashboard_layout", _default_dashboard_layout()),
+            path=f"configuration.profiles.{profile_id}.dashboard_layout",
+        )
 
     assignments = document.get("client_assignments")
     if not isinstance(assignments, dict):
@@ -504,6 +554,71 @@ class ConfigurationManager:
             ),
         )
 
+    def client_dashboard_layout(self, client_id: str) -> dict[str, Any]:
+        """Return the layout of a client's assigned profile and conflict token."""
+        normalized_client_id = _require_identifier(client_id, field="client_id")
+        profile_id = self._data["client_assignments"].get(
+            normalized_client_id, DEFAULT_PROFILE_ID
+        )
+        return {
+            "revision": self._data["revision"],
+            "profile_id": profile_id,
+            **deepcopy(self._data["profiles"][profile_id]["dashboard_layout"]),
+        }
+
+    async def async_update_client_dashboard_layout(
+        self, client_id: str, update: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Atomically replace one order, preserving all other profile data.
+
+        The document revision also changes on profile assignment, so an
+        in-flight edit cannot land on a newly assigned profile. The optional
+        profile ID additionally guards clients rebasing an offline edit.
+        """
+        await self.async_initialize()
+        normalized_client_id = _require_identifier(client_id, field="client_id")
+        if not isinstance(update, Mapping):
+            raise ValidationError("must be an object", path="dashboard_layout")
+        if set(update) - {"base_revision", "profile_id", "scope", "room_id", "order"}:
+            raise ValidationError("contains unsupported fields", path="dashboard_layout")
+        revision = _require_revision(update.get("base_revision"), field="base_revision")
+        scope = update.get("scope")
+        if scope not in ("rooms", "widgets"):
+            raise ValidationError("must be rooms or widgets", path="scope")
+        order = _dashboard_order(update.get("order"), path="order")
+        room_id = None
+        if scope == "widgets":
+            room_id = _require_identifier(update.get("room_id"), field="room_id")
+            if room_id != update["room_id"]:
+                raise ValidationError("must not have surrounding whitespace", path="room_id")
+        elif "room_id" in update:
+            raise ValidationError("is only supported for widgets", path="room_id")
+        requested_profile_id = update.get("profile_id")
+        if "profile_id" in update:
+            requested_profile_id = _require_identifier(requested_profile_id, field="profile_id")
+        async with self._lock:
+            self._check_revision(revision)
+            profile_id = self._data["client_assignments"].get(
+                normalized_client_id, DEFAULT_PROFILE_ID
+            )
+            if requested_profile_id is not None and requested_profile_id != profile_id:
+                raise ConflictError(revision, self._data["revision"])
+            existing = self._data["profiles"][profile_id]
+            candidate = deepcopy(self._data)
+            profile = candidate["profiles"][profile_id]
+            layout = profile["dashboard_layout"]
+            if scope == "rooms":
+                layout["room_order"] = order
+            elif order:
+                layout["widget_orders"][room_id] = order
+            else:
+                layout["widget_orders"].pop(room_id, None)
+            if profile == existing:
+                return self.client_dashboard_layout(normalized_client_id)
+            profile["revision"] = existing["revision"] + 1
+            await self._commit(candidate)
+            return self.client_dashboard_layout(normalized_client_id)
+
     async def async_set_home(
         self, settings: Mapping[str, Any], expected_revision: int | None
     ) -> dict[str, Any]:
@@ -546,17 +661,20 @@ class ConfigurationManager:
         async with self._lock:
             self._check_revision(expected_revision)
             source_settings: dict[str, Any] = {}
+            source_layout = _default_dashboard_layout()
             if copy_from_profile_id is not None:
                 source = self._data["profiles"].get(copy_from_profile_id)
                 if source is None:
                     raise NotFoundError("profile", copy_from_profile_id)
                 source_settings = deepcopy(source["settings"])
+                source_layout = deepcopy(source["dashboard_layout"])
             profile_id = self._unique_profile_id(normalized_name)
             profile = {
                 "id": profile_id,
                 "name": normalized_name,
                 "revision": 0,
                 "settings": source_settings,
+                "dashboard_layout": source_layout,
             }
             candidate = deepcopy(self._data)
             candidate["profiles"][profile_id] = profile

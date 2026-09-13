@@ -380,6 +380,47 @@ class V2ClientSettingsView(HomeAssistantView):
             return _operation_error(err)
 
 
+class V2ClientDashboardLayoutView(HomeAssistantView):
+    """Read a shared profile layout and update only one tile order."""
+
+    url = "/api/couchmate/v2/client/dashboard-layout"
+    name = "api:couchmate:v2:client:dashboard-layout"
+    requires_auth = False
+
+    async def get(self, request):
+        client_id = await _client_id(request)
+        if client_id is None:
+            return _no_store(_error("unauthorized", 401))
+        return _no_store(web.json_response(
+            _configuration(request.app["hass"]).client_dashboard_layout(client_id)
+        ))
+
+    async def put(self, request):
+        client_id = await _client_id(request)
+        if client_id is None:
+            return _no_store(_error("unauthorized", 401))
+        hass = request.app["hass"]
+        if not any(
+            _pairing(hass).client_has_capability(client_id, capability)
+            for capability in ("dashboard:write", "configuration:write")
+        ):
+            return _no_store(_error("capability_required", 403, capability="dashboard:write"))
+        manager = _configuration(hass)
+        try:
+            layout = await manager.async_update_client_dashboard_layout(
+                client_id, await _json_body(request)
+            )
+            return _no_store(web.json_response(layout))
+        except ConflictError as err:
+            return _no_store(_error(
+                "revision_conflict", 409, str(err),
+                current_revision=err.current_revision,
+                layout=manager.client_dashboard_layout(client_id),
+            ))
+        except Exception as err:  # noqa: BLE001
+            return _no_store(_operation_error(err))
+
+
 def _file_response(
     request: web.Request,
     metadata: Any,
@@ -941,6 +982,7 @@ async def async_setup_configuration_api(hass) -> None:
         V2ClientProfilesView(),
         V2ClientProfileView(),
         V2ClientSettingsView(),
+        V2ClientDashboardLayoutView(),
         V2ClientBackgroundView(),
         V2ClientBackgroundMutationView(),
         V2AdminPairingRequestsView(),
