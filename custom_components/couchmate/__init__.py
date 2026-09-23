@@ -175,6 +175,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         for entity_id in area_cfg.get("flow_entities", [])
                         if entity_id
                     )
+                    stored_entities.extend(
+                        str(entity_id)
+                        for entity_id in area_cfg.get("timer_entities", [])
+                        if isinstance(entity_id, str) and entity_id.startswith("timer.")
+                    )
                     for device_id, device_cfg in dict(area_cfg.get("devices", {})).items():
                         if not isinstance(device_cfg, dict):
                             continue

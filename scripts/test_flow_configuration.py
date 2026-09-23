@@ -44,10 +44,12 @@ class FlowConfigurationTests(unittest.IsolatedAsyncioTestCase):
                 setattr(entity, attribute, None)
         for device in self.hass.device_registry.devices.values():
             device.name, device.name_by_user = "Lamp", None
+            device.manufacturer, device.model = None, None
         states = {
             entity_id: SimpleNamespace(entity_id=entity_id, name=entity_id, state="off", attributes={}, last_changed=now, last_updated=now)
             for entity_id in self.hass.entity_registry.entities
         }
+        self.states = states
         self.hass.states = SimpleNamespace(get=states.get, async_all=lambda domain: [])
         self.hass.config = SimpleNamespace(units=SimpleNamespace(temperature_unit="°C"))
 
@@ -125,6 +127,131 @@ class FlowConfigurationTests(unittest.IsolatedAsyncioTestCase):
             self.payload["selection_model"]["areas"]["kitchen"]["flow_mode"] = invalid
             await self.save()
             self.assertEqual((await self.client_response())["flow_modes"], {"kitchen": "automatic"})
+
+    def add_timer(self, entity_id="timer.cooking", *, area_id=None, disabled=False):
+        now = datetime.now(timezone.utc)
+        self.hass.entity_registry.entities[entity_id] = SimpleNamespace(
+            entity_id=entity_id, area_id=area_id, device_id=None,
+            disabled=disabled, name=None, original_name=None, icon=None,
+            original_icon=None, device_class=None, unit_of_measurement=None,
+        )
+        self.states[entity_id] = SimpleNamespace(
+            entity_id=entity_id, name="Cooking", state="active",
+            attributes={
+                "duration": "0:10:00",
+                "finishes_at": "2026-09-23T10:10:00+00:00",
+                "remaining": "0:08:00",
+            }, last_changed=now, last_updated=now,
+        )
+
+    async def test_device_less_timer_is_selectable_and_has_room_in_client_payload(self):
+        self.add_timer()
+        data = await fixtures.CONFIGURATOR.CouchMateConfiguratorDataView().get(
+            fixtures.Request(self.hass, {})
+        )
+        kitchen = next(area for area in data["areas"] if area["id"] == "kitchen")
+        self.assertEqual(kitchen["timer_candidates"][0]["entity_id"], "timer.cooking")
+        self.assertTrue(kitchen["timer_candidates"][0]["area_unassigned"])
+
+        self.payload["selection_model"]["areas"]["kitchen"] = {
+            "timer_entities": ["timer.cooking"], "devices": {},
+        }
+        await self.save()
+        await CORE.async_unload_entry(self.hass, self.entry)
+        await CORE.async_setup_entry(self.hass, self.entry)
+        response = await self.client_response()
+        timer = next(item for item in response["entities"] if item["entity_id"] == "timer.cooking")
+        self.assertEqual(timer["area_id"], "kitchen")
+        self.assertEqual(timer["area_name"], "Kitchen")
+        self.assertEqual(timer["attributes"]["finishes_at"], "2026-09-23T10:10:00+00:00")
+        self.assertIn("timer.cooking", response["explicit_entity_ids"])
+        self.assertIn({"id": "kitchen", "name": "Kitchen"}, response["areas"])
+
+    async def test_timer_selection_rejects_foreign_disabled_and_other_domains(self):
+        self.add_timer("timer.foreign", area_id="garden")
+        self.add_timer("timer.disabled", disabled=True)
+        self.payload["selection_model"]["areas"]["kitchen"] = {
+            "timer_entities": ["timer.foreign", "timer.disabled", "switch.kitchen", "timer.missing"],
+            "devices": {},
+        }
+        await self.save()
+        self.assertNotIn("timer_entities", self.entry.data[CORE.CONF_SELECTION_MODEL]["areas"].get("kitchen", {}))
+        self.assertEqual((await self.client_response())["entities"], [])
+
+    async def test_unassigned_timer_can_be_selected_in_only_one_room(self):
+        self.add_timer()
+        self.hass.area_registry.areas["living"] = SimpleNamespace(id="living", name="Living")
+        self.payload["selection_model"]["areas"] = {
+            "kitchen": {"timer_entities": ["timer.cooking"], "devices": {}},
+            "living": {"timer_entities": ["timer.cooking"], "devices": {}},
+        }
+        await self.save()
+        saved = self.entry.data[CORE.CONF_SELECTION_MODEL]["areas"]
+        self.assertEqual(saved["kitchen"]["timer_entities"], ["timer.cooking"])
+        self.assertNotIn("timer_entities", saved.get("living", {}))
+        response = await self.client_response()
+        timer = next(item for item in response["entities"] if item["entity_id"] == "timer.cooking")
+        self.assertEqual(timer["area_id"], "kitchen")
+
+    async def test_timer_service_whitelist_and_duration_validation(self):
+        self.add_timer()
+        self.payload["selection_model"]["areas"]["kitchen"] = {
+            "timer_entities": ["timer.cooking"], "devices": {},
+        }
+        await self.save()
+        await self.client_response()  # Install the paired-token adapter.
+        calls = []
+
+        async def call(*args, **kwargs):
+            calls.append((args, kwargs))
+
+        self.hass.services.async_call = call
+
+        async def invoke(service, data=None, entity_ids=None):
+            async def body():
+                return {"domain": "timer", "service": service,
+                        "entity_ids": entity_ids or ["timer.cooking"], "data": data or {}}
+            request = SimpleNamespace(
+                app={"hass": self.hass},
+                headers={"Authorization": "Bearer paired-token"},
+                json=body,
+            )
+            return await API.CouchMateClientServiceView().post(request)
+
+        for service, data, expected in (
+            ("start", {}, {}),
+            ("start", {"duration": "00:05:00"}, {"duration": 300}),
+            ("start", {"duration": 60.0}, {"duration": 60}),
+            ("pause", {}, {}),
+            ("cancel", {}, {}),
+            ("finish", {}, {}),
+            ("change", {"duration": -60}, {"duration": -60}),
+            ("change", {"duration": -60.0}, {"duration": -60}),
+        ):
+            response = await invoke(service, data)
+            self.assertTrue(response["success"])
+            self.assertEqual(calls[-1][0], ("timer", service, expected))
+            self.assertEqual(calls[-1][1]["target"], {"entity_id": ["timer.cooking"]})
+
+        before = len(calls)
+        for service, data in (
+            ("reload", {}),
+            ("pause", {"duration": 60}),
+            ("change", {}),
+            ("change", {"duration": 0}),
+            ("start", {"duration": -5}),
+            ("start", {"duration": "00:60:00"}),
+            ("start", {"duration": "--5"}),
+            ("start", {"duration": True}),
+            ("start", {"duration": 60.5}),
+            ("start", {"duration": float("nan")}),
+            ("change", {"duration": float("inf")}),
+            ("start", {"entity_id": "timer.foreign"}),
+        ):
+            response = await invoke(service, data)
+            self.assertIn("error", response)
+        self.assertEqual((await invoke("start", entity_ids=["timer.foreign"]))["error"], "entity_not_selected")
+        self.assertEqual(len(calls), before)
 
 
 if __name__ == "__main__":

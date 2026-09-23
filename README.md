@@ -48,6 +48,10 @@ Als Inhalte stehen die dem Raum zugeordneten Lichter, Schalter, Rollläden, Medi
 
 Der Auswahlvertrag speichert `flow_mode` (`automatic`, `custom`, `hidden`) und `flow_entities` pro Raum in `selection_model.areas`. Die Client-API liefert dazu `flow_modes` und `flow_entity_order`, jeweils nach Home-Assistant-Bereichs-ID. Fehlende oder unbekannte Modi verwenden `automatic`. Lokale Prüfung: `python3 -B scripts/test_configurator_save.py` und `python3 -B scripts/test_flow_configuration.py`.
 
+### Home-Assistant-Timer
+
+Im Raumkonfigurator lassen sich `timer.*`-Helfer auswählen. Ein Timer ohne Home-Assistant-Bereich kann genau einem CouchMate-Raum zugeordnet werden; die Zuordnung wird als `timer_entities` im Auswahlmodell gespeichert. Die Client-API überträgt den Zustand und die Home-Assistant-Attribute `duration`, `finishes_at` und `remaining` wie bei anderen Entitäten. Gekoppelte Clients können ausgewählte Timer über `/api/couchmate/client/service` starten, pausieren, abbrechen, vorzeitig beenden und mit `timer.change` verändern. `timer.start` akzeptiert optional eine positive `duration`, `timer.change` benötigt eine positive oder negative `duration`; andere Datenfelder sind nicht erlaubt. Lokale Prüfung: `python3 -B scripts/test_flow_configuration.py`.
+
 ### Dashboard-Kacheln synchronisieren · 1.4.0-beta.12
 
 Apple TVs können die Reihenfolge von Räumen und Widgets je Raum im zugewiesenen Core-Profil speichern. Apple TVs mit demselben Profil lesen dieselbe Anordnung; separate Profile bleiben unabhängig. Die Reihenfolge bleibt nach einem Core-Neustart erhalten. Neue Kacheln ohne gespeicherten Eintrag werden von den Apps an die bestehende Reihenfolge angehängt.
