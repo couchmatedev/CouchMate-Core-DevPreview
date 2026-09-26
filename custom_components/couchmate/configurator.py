@@ -25,6 +25,12 @@ from .const import (
 from .storage import async_save_entities
 from .page_layout import render_page
 from .flow import normalize_flow_mode
+from .energy_dashboard import energy_enabled
+from .security_dashboard import (
+    configured_security_dashboard,
+    normalize_security_dashboard,
+    valid_security_entity,
+)
 from .washdata import washdata_entry_id, washdata_sensor_entity_ids
 
 
@@ -166,6 +172,18 @@ class CouchMateConfiguratorDataView(HomeAssistantView):
             show_room_climate = True
         explicit_entities = set(current.get("explicit_entities", []))
         fully_selected_devices = set(current.get("devices", []))
+        security_dashboard = configured_security_dashboard(selection_model)
+        security_candidates = {"alarm": [], "camera": [], "contact": []}
+        for entity in entities.entities.values():
+            state = hass.states.get(entity.entity_id)
+            for kind in security_candidates:
+                if valid_security_entity(entity.entity_id, kind, entity, state):
+                    security_candidates[kind].append({
+                        "entity_id": entity.entity_id,
+                        "name": _name(entity, state, entity.entity_id),
+                    })
+        for candidates in security_candidates.values():
+            candidates.sort(key=lambda item: item["name"].casefold())
         weather_candidates = []
         for entity in entities.entities.values():
             if entity.disabled or not entity.entity_id.startswith("weather."):
@@ -324,10 +342,13 @@ class CouchMateConfiguratorDataView(HomeAssistantView):
             })
         return self.json({
             "areas": result_areas,
+            "energy_dashboard": {"enabled": energy_enabled(selection_model)},
             "weather_entity": weather_entity,
             "thermostat_card_style": thermostat_card_style,
             "show_room_name": show_room_name,
             "show_room_climate": show_room_climate,
+            "security_dashboard": security_dashboard,
+            "security_candidates": security_candidates,
             "weather_candidates": sorted(
                 weather_candidates,
                 key=lambda item: item["name"].casefold(),
@@ -363,6 +384,9 @@ class CouchMateConfiguratorSaveView(HomeAssistantView):
         hero_layouts = _default_profile_hero_layouts(hass)
         assigned_timers: set[str] = set()
         assigned_washdata_devices: set[str] = set()
+        security_dashboard = normalize_security_dashboard(
+            raw_model.get("security_dashboard"), entity_registry, getattr(hass, "states", None)
+        )
 
         thermostat_card_style = raw_model.get("thermostat_card_style", "full")
         if thermostat_card_style not in ("ring", "full_vertical", "full", "compact", "hidden"):
@@ -566,11 +590,16 @@ class CouchMateConfiguratorSaveView(HomeAssistantView):
         explicit_entities = list(dict.fromkeys(explicit_entities))
         selection_model = {
             "version": SELECTION_MODEL_VERSION,
+            "energy_dashboard": {
+                "enabled": raw_model.get("energy_dashboard", {}).get("enabled") is True
+                if isinstance(raw_model.get("energy_dashboard"), dict) else False,
+            },
             "weather": weather_entity,
             "thermostat_card_style": thermostat_card_style,
             "show_room_name": show_room_name,
             "show_room_climate": show_room_climate,
             "areas": model_areas,
+            "security_dashboard": security_dashboard,
         }
 
         # Version 2 is authoritative: no broad area selection is stored. A
@@ -614,6 +643,8 @@ class CouchMateConfiguratorSaveView(HomeAssistantView):
             "selection_model": selection_model,
             "entities": resolved,
         })
+        runtime.pop("energy_dashboard_cache", None)
+        runtime["energy_dashboard_generation"] = runtime.get("energy_dashboard_generation", 0) + 1
         entry = runtime.get("entry")
         if entry:
             hass.config_entries.async_update_entry(entry, data=data)
@@ -651,7 +682,7 @@ HTML = r'''<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name
 @media(max-width:900px){.flow-mode-grid{grid-template-columns:1fr}}@media(max-width:760px){.flow-entry{align-items:stretch;flex-direction:column}.entities{grid-template-columns:minmax(0,1fr)}.flow-preview-deck{flex-direction:column}.flow-selected-row{flex-wrap:wrap}.flow-selected-row .order-actions{width:100%;justify-content:flex-end}}
 </style><!--CORE_PAGE_STYLES--></head><body><main class="wrap">
 <!--CORE_PAGE_HEADER-->
-<section id="areas" class="section"><div id="weatherPanel" class="config-panel"><h3>Wettervorhersage</h3><p class="sub">Wähle optional eine globale Wetter-Entität für Uhrzeit und Forecast auf allen Apple TVs.</p><div id="weatherGrid" class="choice-grid"></div></div><div id="thermostatStylePanel" class="config-panel"><h3>Hero-Darstellung</h3><p class="sub">Der Thermostat-Standard gilt für alle Räume und kann im Raum gezielt überschrieben werden.</p><div id="thermostatStyleGrid" class="choice-grid"></div><div class="choice-grid" style="margin-top:16px"><label class="choice"><input id="showRoomName" type="checkbox"><span><b>Raumname anzeigen</b><span class="sub">Blendet nur den Raumnamen oberhalb des Hero ein oder aus.</span></span></label><label class="choice"><input id="showRoomClimate" type="checkbox"><span><b>Raumklima anzeigen</b><span class="sub">Blendet Temperatur und Humidity-Icon unabhängig vom Raumnamen ein oder aus.</span></span></label></div></div><h2>Räume</h2><div id="areaGrid" class="grid"></div></section>
+<section id="areas" class="section"><div id="energyDashboardPanel" class="config-panel"><h3>Energie-Dashboard</h3><p class="sub">Optionales Dashboard mit heutigen Stromsummen und Tagesverlauf aus der bestehenden Home-Assistant-Energy-Konfiguration. Dazu müssen Energiequellen und Recorder-Statistiken in Home Assistant eingerichtet sein.</p><label class="choice"><input id="energyDashboardEnabled" type="checkbox"><span><b>Energie-Dashboard anzeigen</b><span class="sub">Verwendet Netzbezug, Einspeisung, Solar- und Batteriespeicherwerte aus Home Assistant Energy. Es werden keine Steuerbefehle gesendet.</span></span></label></div><div id="securityDashboardPanel" class="config-panel"><h3>Sicherheits-Dashboard</h3><p class="sub">Optionales Dashboard für Alarmanlagen, Kamerabilder und Tür-/Fensterkontakte. Die Ansicht zeigt nur die hier gewählten Quellen. Eine PIN wird nie gespeichert.</p><label class="choice"><input id="securityDashboardEnabled" type="checkbox"><span><b>Sicherheits-Dashboard anzeigen</b><span class="sub">Scharf-/Unscharfschalten ist nur für ausdrücklich gewählte Alarmanlagen möglich.</span></span></label><h4>Alarmanlagen</h4><div id="securityAlarmGrid" class="entities"></div><h4>Kameras und Bilder</h4><div id="securityCameraGrid" class="entities"></div><h4>Tür- und Fensterkontakte</h4><div id="securityContactGrid" class="entities"></div></div><div id="weatherPanel" class="config-panel"><h3>Wettervorhersage</h3><p class="sub">Wähle optional eine globale Wetter-Entität für Uhrzeit und Forecast auf allen Apple TVs.</p><div id="weatherGrid" class="choice-grid"></div></div><div id="thermostatStylePanel" class="config-panel"><h3>Hero-Darstellung</h3><p class="sub">Der Thermostat-Standard gilt für alle Räume und kann im Raum gezielt überschrieben werden.</p><div id="thermostatStyleGrid" class="choice-grid"></div><div class="choice-grid" style="margin-top:16px"><label class="choice"><input id="showRoomName" type="checkbox"><span><b>Raumname anzeigen</b><span class="sub">Blendet nur den Raumnamen oberhalb des Hero ein oder aus.</span></span></label><label class="choice"><input id="showRoomClimate" type="checkbox"><span><b>Raumklima anzeigen</b><span class="sub">Blendet Temperatur und Humidity-Icon unabhängig vom Raumnamen ein oder aus.</span></span></label></div></div><h2>Räume</h2><div id="areaGrid" class="grid"></div></section>
 <section id="devices" class="section hidden"><button class="back" id="backAreas">← Räume</button><div class="crumb" id="areaName"></div>
 <div class="config-panel flow-entry"><div><h3>Flow-Leiste</h3><div class="sub">Inhalte unter der Hero Card für diesen Raum festlegen.</div></div><button id="openRoomFlow" class="button secondary" type="button">Flow konfigurieren</button></div>
 <div id="climatePanel" class="config-panel"><h3>Thermostat</h3><p class="sub">Dieses Thermostat wird direkt im Hero bedienbar. Ohne Auswahl verwendet CouchMate automatisch das einzige freigegebene Thermostat.</p><div id="climateGrid" class="choice-grid"></div></div>
@@ -679,7 +710,7 @@ HTML = r'''<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name
 </div></section>
 </main><div id="toast" class="toast hidden" role="status" aria-live="polite"></div><script>
 let data,area,device,flowArea;
-const selected={devices:new Map(),temperatures:{},humidities:{},climates:{},timers:{},washdata:{},orders:{},right:{},flows:{},flowModes:{},layouts:{},thermostatStyle:'full',thermostatStyles:{},showRoomName:true,showRoomClimate:true,weather:null};
+const selected={energyEnabled:false,securityEnabled:false,securityAlarms:[],securityCameras:[],securityContacts:[],devices:new Map(),temperatures:{},humidities:{},climates:{},timers:{},washdata:{},orders:{},right:{},flows:{},flowModes:{},layouts:{},thermostatStyle:'full',thermostatStyles:{},showRoomName:true,showRoomClimate:true,weather:null};
 const paths={room:'<path d="M4 10.5 12 4l8 6.5V20H4z"/><path d="M9 20v-6h6v6"/>',light:'<path d="M9 18h6"/><path d="M10 22h4"/><path d="M8.5 14.5A6 6 0 1 1 15.5 14.5c-1 .8-1.5 1.8-1.5 3h-4c0-1.2-.5-2.2-1.5-3Z"/>',switch:'<path d="M7 2v5M17 2v5"/><path d="M5 7h14v7a7 7 0 0 1-14 0Z"/><path d="M9 21h6"/>',media_player:'<rect x="3" y="5" width="18" height="13" rx="2"/><path d="m10 9 5 2.5-5 2.5Z"/><path d="M8 22h8"/>',climate:'<path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0Z"/><path d="M12 11v6"/>',cover:'<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M4 8h16M4 13h16M4 18h16"/>',sensor:'<path d="M4 19V5M4 19h16"/><path d="m7 15 3-4 3 2 5-7"/>',default:'<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M9 9h6v6H9z"/>'};
 function icon(kind){return `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[kind]||paths.default}</svg>`}
 function roomKind(name){const n=name.toLowerCase();if(n.includes('wohn'))return 'media_player';if(n.includes('küche')||n.includes('kueche'))return 'switch';if(n.includes('schlaf'))return 'light';if(n.includes('bad')||n.includes('wc'))return 'climate';if(n.includes('garten'))return 'sensor';if(n.includes('garage'))return 'cover';return 'room'}
@@ -799,6 +830,26 @@ function renderFlowChoices(){
     }
 }
 
+function renderSecurityDashboard(){
+    securityDashboardEnabled.checked=selected.securityEnabled;
+    securityDashboardEnabled.onchange=()=>selected.securityEnabled=securityDashboardEnabled.checked;
+    for(const [kind,grid,field] of [
+        ['alarm',securityAlarmGrid,'securityAlarms'],
+        ['camera',securityCameraGrid,'securityCameras'],
+        ['contact',securityContactGrid,'securityContacts'],
+    ]){
+        grid.innerHTML='';
+        const candidates=data.security_candidates?.[kind]||[];
+        if(!candidates.length){const empty=document.createElement('p');empty.className='sub';empty.textContent='Keine passenden Home-Assistant-Entitäten vorhanden.';grid.append(empty);continue}
+        for(const entity of candidates){
+            const row=document.createElement('label');row.className='entity';
+            row.innerHTML=`<input type="checkbox"><span><b>${esc(entity.name)}</b><span class="sub">${esc(entity.entity_id)}</span></span>`;
+            const input=row.querySelector('input');input.checked=selected[field].includes(entity.entity_id);
+            input.onchange=()=>{selected[field]=input.checked?[...new Set([...selected[field],entity.entity_id])]:selected[field].filter(id=>id!==entity.entity_id)};
+            grid.append(row);
+        }
+    }
+}
 function renderWeather(){renderChoices(weatherPanel,weatherGrid,data.weather_candidates,selected.weather,value=>selected.weather=value,'globalWeather','Automatisch','Erste verfügbare Wetter-Entität verwenden')}
 function renderTimerChoices(){
     const candidates=area.timer_candidates||[];
@@ -844,6 +895,9 @@ function renderAreas(){
     showCoreSection('configurator');
     areas.classList.remove('hidden');devices.classList.add('hidden');entities.classList.add('hidden');
     renderWeather();
+    renderSecurityDashboard();
+    energyDashboardEnabled.checked=selected.energyEnabled;
+    energyDashboardEnabled.onchange=()=>selected.energyEnabled=energyDashboardEnabled.checked;
     renderThermostatStyles(thermostatStylePanel,thermostatStyleGrid,selected.thermostatStyle,value=>selected.thermostatStyle=value||'full','globalThermostatStyle',false);
     showRoomName.checked=selected.showRoomName;
     showRoomName.onchange=()=>selected.showRoomName=showRoomName.checked;
@@ -863,8 +917,8 @@ function renderAreas(){
 }
 function renderDevices(){showCoreSection('configurator');openRoomFlow.onclick=()=>navigateCore('flow',area.id);areas.classList.add('hidden');devices.classList.remove('hidden');entities.classList.add('hidden');areaName.textContent=area.name;deviceGrid.innerHTML='';renderChoices(climatePanel,climateGrid,area.climate_candidates,selected.climates[area.id],value=>{if(value)selected.climates[area.id]=value;else delete selected.climates[area.id]},`climate-${area.id}`,'Automatisch','Einziges freigegebenes Thermostat verwenden');renderThermostatStyles(roomThermostatStylePanel,roomThermostatStyleGrid,selected.thermostatStyles[area.id]??null,value=>{if(value)selected.thermostatStyles[area.id]=value;else delete selected.thermostatStyles[area.id]},`roomThermostatStyle-${area.id}`,true);renderHeroCardStyles();renderChoices(temperaturePanel,temperatureGrid,area.temperature_candidates,selected.temperatures[area.id],value=>{if(value)selected.temperatures[area.id]=value;else delete selected.temperatures[area.id]},`temperature-${area.id}`,'Thermostat-Fallback','Istwert des Thermostats verwenden');renderChoices(humidityPanel,humidityGrid,area.humidity_candidates,selected.humidities[area.id],value=>{if(value)selected.humidities[area.id]=value;else delete selected.humidities[area.id]},`humidity-${area.id}`,'Thermostat-Fallback','Luftfeuchte des Thermostats verwenden');renderHeroOrder();renderHeroRight();renderTimerChoices();renderWashdataChoices();for(const d of area.devices){const domain=d.entities[0]?.domain||'default';const st=deviceState(d);const subtitle=[d.manufacturer,d.model].filter(Boolean).join(' · ')||`${d.entities.length} Funktionen`;deviceGrid.append(tile(d.name,{text:subtitle,selection:st.mode==='entities'?`${st.entities.size} ${st.entities.size===1?'Funktion':'Funktionen'} gewählt`:''},domain,deviceSelectionState(d),()=>{device=d;renderEntities()}))}}
 function renderEntities(){devices.classList.add('hidden');entities.classList.remove('hidden');deviceName.textContent=`${area.name} · ${device.name}`;entityGrid.innerHTML='';let st=deviceState(device);selectWholeDevice.checked=st.mode==='all';selectWholeDevice.onchange=()=>{if(selectWholeDevice.checked)setDeviceState(device.id,{mode:'all',entities:new Set()});else setDeviceState(device.id,{mode:'none',entities:new Set()});renderEntities()};for(const e of device.entities){st=deviceState(device);const row=document.createElement('label');row.className='entity';row.innerHTML=`<input type="checkbox" ${(st.mode==='all'||(st.mode==='entities'&&st.entities.has(e.entity_id)))?'checked':''} ${st.mode==='all'?'disabled':''}><span><b>${esc(e.name)}</b><span class="sub">${esc(e.entity_id)}</span></span>`;const c=row.querySelector('input');c.onchange=()=>{const current=deviceState(device);const ids=current.mode==='entities'?new Set(current.entities):new Set();if(c.checked)ids.add(e.entity_id);else ids.delete(e.entity_id);setDeviceState(device.id,{mode:'entities',entities:ids})};entityGrid.append(row)}}
-function buildSelectionModel(){const model={version:2,weather:selected.weather,thermostat_card_style:selected.thermostatStyle,show_room_name:selected.showRoomName,show_room_climate:selected.showRoomClimate,areas:{}};for(const a of data.areas){const cfg={devices:{}};const flowMode=selected.flowModes[a.id]||'automatic';if(flowMode!=='automatic')cfg.flow_mode=flowMode;if(selected.temperatures[a.id])cfg.temperature=selected.temperatures[a.id];if(selected.humidities[a.id])cfg.humidity=selected.humidities[a.id];if(selected.climates[a.id])cfg.climate=selected.climates[a.id];if(selected.thermostatStyles[a.id])cfg.thermostat_card_style=selected.thermostatStyles[a.id];cfg.hero_layout={...roomHeroLayout(a),thermostat_card_style:selected.thermostatStyles[a.id]??selected.thermostatStyle};const order=normalizedHeroOrder(a).map(e=>e.entity_id);if(order.length)cfg.hero_order=order;const right=(selected.right[a.id]||[]).slice(0,12);if(right.length)cfg.hero_right_entities=right;const flow=(selected.flows[a.id]||[]).slice(0,3);if(flow.length)cfg.flow_entities=flow;const timers=[...new Set(selected.timers[a.id]||[])];if(timers.length)cfg.timer_entities=timers;const washdata=[...new Set(selected.washdata[a.id]||[])];if(washdata.length)cfg.washdata_devices=washdata;for(const d of a.devices){const st=deviceState(d);if(st.mode==='all')cfg.devices[d.id]={mode:'all',entities:[]};else if(st.mode==='entities'&&st.entities.size)cfg.devices[d.id]={mode:'entities',entities:[...st.entities]}}if(cfg.temperature||cfg.humidity||cfg.climate||cfg.thermostat_card_style||cfg.hero_order||cfg.hero_right_entities||cfg.flow_entities||cfg.timer_entities||cfg.washdata_devices||cfg.flow_mode||Object.keys(cfg.devices).length)model.areas[a.id]=cfg}return model}
-api('/api/couchmate/configurator/data').then(r=>r.json()).then(j=>{data=j;selected.weather=j.weather_entity??null;selected.thermostatStyle=j.thermostat_card_style??'full';selected.showRoomName=j.show_room_name??true;selected.showRoomClimate=j.show_room_climate??true;for(const a of data.areas){if(a.temperature_entity)selected.temperatures[a.id]=a.temperature_entity;if(a.humidity_entity)selected.humidities[a.id]=a.humidity_entity;if(a.climate_entity)selected.climates[a.id]=a.climate_entity;const heroLayout=a.hero_layout||{};selected.layouts[a.id]={device_card_style:heroLayout.device_card_style||'bubble',camera_card_style:heroLayout.camera_card_style||'large',media_card_style:heroLayout.media_card_style||'transport'};if(heroLayout.thermostat_card_style)selected.thermostatStyles[a.id]=heroLayout.thermostat_card_style;else if(a.thermostat_card_style)selected.thermostatStyles[a.id]=a.thermostat_card_style;selected.orders[a.id]=a.hero_order||[];selected.right[a.id]=[...new Set(a.hero_right_entities||[])].slice(0,12);selected.flows[a.id]=[...new Set(a.flow_entities||[])].slice(0,3);selected.timers[a.id]=[...new Set(a.timer_entities||[])];selected.washdata[a.id]=[...new Set(a.washdata_devices||[])];selected.flowModes[a.id]=['automatic','custom','hidden'].includes(a.flow_mode)?a.flow_mode:'automatic';for(const d of a.devices){const ids=new Set(d.entities.filter(e=>e.selected).map(e=>e.entity_id));if(d.selection_mode==='all')selected.devices.set(d.id,{mode:'all',entities:new Set()});else if(ids.size)selected.devices.set(d.id,{mode:'entities',entities:ids})}}if(new URL(location.href).searchParams.get('section')==='flow')renderFlowPage();else renderAreas()}).catch(e=>showToast('error','Konfigurator konnte nicht geladen werden',e.message==='AUTH'?'Öffne die Seite im selben Browser, in dem du bei Home Assistant angemeldet bist.':e.message));
+function buildSelectionModel(){const model={version:2,energy_dashboard:{enabled:selected.energyEnabled},security_dashboard:{enabled:selected.securityEnabled,alarm_entity_ids:[...new Set(selected.securityAlarms)],camera_entity_ids:[...new Set(selected.securityCameras)],contact_entity_ids:[...new Set(selected.securityContacts)]},weather:selected.weather,thermostat_card_style:selected.thermostatStyle,show_room_name:selected.showRoomName,show_room_climate:selected.showRoomClimate,areas:{}};for(const a of data.areas){const cfg={devices:{}};const flowMode=selected.flowModes[a.id]||'automatic';if(flowMode!=='automatic')cfg.flow_mode=flowMode;if(selected.temperatures[a.id])cfg.temperature=selected.temperatures[a.id];if(selected.humidities[a.id])cfg.humidity=selected.humidities[a.id];if(selected.climates[a.id])cfg.climate=selected.climates[a.id];if(selected.thermostatStyles[a.id])cfg.thermostat_card_style=selected.thermostatStyles[a.id];cfg.hero_layout={...roomHeroLayout(a),thermostat_card_style:selected.thermostatStyles[a.id]??selected.thermostatStyle};const order=normalizedHeroOrder(a).map(e=>e.entity_id);if(order.length)cfg.hero_order=order;const right=(selected.right[a.id]||[]).slice(0,12);if(right.length)cfg.hero_right_entities=right;const flow=(selected.flows[a.id]||[]).slice(0,3);if(flow.length)cfg.flow_entities=flow;const timers=[...new Set(selected.timers[a.id]||[])];if(timers.length)cfg.timer_entities=timers;const washdata=[...new Set(selected.washdata[a.id]||[])];if(washdata.length)cfg.washdata_devices=washdata;for(const d of a.devices){const st=deviceState(d);if(st.mode==='all')cfg.devices[d.id]={mode:'all',entities:[]};else if(st.mode==='entities'&&st.entities.size)cfg.devices[d.id]={mode:'entities',entities:[...st.entities]}}if(cfg.temperature||cfg.humidity||cfg.climate||cfg.thermostat_card_style||cfg.hero_order||cfg.hero_right_entities||cfg.flow_entities||cfg.timer_entities||cfg.washdata_devices||cfg.flow_mode||Object.keys(cfg.devices).length)model.areas[a.id]=cfg}return model}
+api('/api/couchmate/configurator/data').then(r=>r.json()).then(j=>{data=j;selected.energyEnabled=j.energy_dashboard?.enabled===true;selected.securityEnabled=j.security_dashboard?.enabled===true;selected.securityAlarms=[...new Set(j.security_dashboard?.alarm_entity_ids||[])];selected.securityCameras=[...new Set(j.security_dashboard?.camera_entity_ids||[])];selected.securityContacts=[...new Set(j.security_dashboard?.contact_entity_ids||[])];selected.weather=j.weather_entity??null;selected.thermostatStyle=j.thermostat_card_style??'full';selected.showRoomName=j.show_room_name??true;selected.showRoomClimate=j.show_room_climate??true;for(const a of data.areas){if(a.temperature_entity)selected.temperatures[a.id]=a.temperature_entity;if(a.humidity_entity)selected.humidities[a.id]=a.humidity_entity;if(a.climate_entity)selected.climates[a.id]=a.climate_entity;const heroLayout=a.hero_layout||{};selected.layouts[a.id]={device_card_style:heroLayout.device_card_style||'bubble',camera_card_style:heroLayout.camera_card_style||'large',media_card_style:heroLayout.media_card_style||'transport'};if(heroLayout.thermostat_card_style)selected.thermostatStyles[a.id]=heroLayout.thermostat_card_style;else if(a.thermostat_card_style)selected.thermostatStyles[a.id]=a.thermostat_card_style;selected.orders[a.id]=a.hero_order||[];selected.right[a.id]=[...new Set(a.hero_right_entities||[])].slice(0,12);selected.flows[a.id]=[...new Set(a.flow_entities||[])].slice(0,3);selected.timers[a.id]=[...new Set(a.timer_entities||[])];selected.washdata[a.id]=[...new Set(a.washdata_devices||[])];selected.flowModes[a.id]=['automatic','custom','hidden'].includes(a.flow_mode)?a.flow_mode:'automatic';for(const d of a.devices){const ids=new Set(d.entities.filter(e=>e.selected).map(e=>e.entity_id));if(d.selection_mode==='all')selected.devices.set(d.id,{mode:'all',entities:new Set()});else if(ids.size)selected.devices.set(d.id,{mode:'entities',entities:ids})}}if(new URL(location.href).searchParams.get('section')==='flow')renderFlowPage();else renderAreas()}).catch(e=>showToast('error','Konfigurator konnte nicht geladen werden',e.message==='AUTH'?'Öffne die Seite im selben Browser, in dem du bei Home Assistant angemeldet bist.':e.message));
 document.querySelectorAll('.nav a[data-core-section]').forEach(link=>{if(link.dataset.coreSection==='management')return;link.onclick=event=>{if(!data)return;event.preventDefault();navigateCore(link.dataset.coreSection)}});
 window.addEventListener('popstate',()=>{if(!data)return;if(new URL(location.href).searchParams.get('section')==='flow')renderFlowPage();else renderAreas()});
 backAreas.onclick=renderAreas;backDevices.onclick=renderDevices;save.onclick=async()=>{save.disabled=true;save.textContent='Speichert …';showToast('', 'Auswahl wird gespeichert','Bitte einen Moment warten.');try{const r=await api('/api/couchmate/configurator/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({selection_model:buildSelectionModel()})});const j=await r.json();if(!j.success)throw new Error('Unbekannter Speicherfehler');showToast('ok','Auswahl erfolgreich gespeichert',`${j.area_count} Räume · ${j.entity_count} einzelne Funktionen · ${j.climate_count} Thermostate · Wetter ${j.weather_configured?'fest gewählt':'automatisch'}`)}catch(e){showToast('error','Speichern fehlgeschlagen',e.message==='AUTH'?'Die Home-Assistant-Anmeldung ist abgelaufen. Bitte Home Assistant neu laden.':e.message)}finally{save.disabled=false;save.textContent='Auswahl speichern'}};

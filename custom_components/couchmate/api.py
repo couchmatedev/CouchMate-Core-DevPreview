@@ -27,8 +27,18 @@ from homeassistant.helpers import entity_registry as er
 
 from .const import CONFIGURATION_MANAGER, DIAGNOSTICS_MANAGER, DOMAIN, PAIRING_MANAGER
 from .diagnostics import DiagnosticsManager, SCREENSHOT_MAX_BYTES
+from .energy_dashboard import async_energy_dashboard_payload
 from .flow import flow_modes_for_selection
 from .pairing import PairingManager, PairingStatus
+from .security_dashboard import (
+    ALARM_SERVICES,
+    alarm_metadata,
+    configured_security_dashboard,
+    contact_metadata,
+    normalize_security_dashboard,
+    validate_alarm_action,
+    valid_security_entity,
+)
 from .storage import async_save_entities
 from .washdata import selected_washdata_rooms, washdata_entry_id, washdata_sensor_entity_ids
 
@@ -210,6 +220,22 @@ def _effective_client_entity_ids(hass: HomeAssistant) -> list[str]:
         if (device := device_registry.async_get(device_id)) is not None
         for entity_id in washdata_sensor_entity_ids(device, entity_registry).values()
     ]
+    security_dashboard = configured_security_dashboard(selection_model)
+    configured_security_entity_ids = (
+        [
+            entity_id
+            for kind, field in (
+                ("alarm", "alarm_entity_ids"),
+                ("camera", "camera_entity_ids"),
+                ("contact", "contact_entity_ids"),
+            )
+            for entity_id in security_dashboard[field]
+            if valid_security_entity(
+                entity_id, kind, entity_registry.async_get(entity_id), hass.states.get(entity_id)
+            )
+        ]
+        if security_dashboard["enabled"] else []
+    )
 
     # Resolve registry-backed selections for every client snapshot instead of
     # relying on the flattened list created when Core started or the selection
@@ -259,6 +285,7 @@ def _effective_client_entity_ids(hass: HomeAssistant) -> list[str]:
         *configured_flow_entity_ids,
         *configured_timer_entity_ids,
         *configured_washdata_entity_ids,
+        *configured_security_entity_ids,
     ]))
 
     # Weather is configured once for the global dashboard header. It must not
@@ -618,6 +645,14 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                     # or a signed entity_picture URL into client state/logs.
                     payload["attributes"].pop("access_token", None)
                     payload["attributes"].pop("entity_picture", None)
+                if entity_id.startswith("alarm_control_panel."):
+                    # An alarm integration may add arbitrary state attributes.
+                    # Only the UI metadata is needed by a paired client.
+                    payload["attributes"] = {
+                        key: payload["attributes"][key]
+                        for key in ("supported_features", "code_format", "code_arm_required")
+                        if key in payload["attributes"]
+                    }
                 entities.append(payload)
             except Exception as err:  # noqa: BLE001
                 _LOGGER.exception("Unable to serialize CouchMate client entity %s", entity_id)
@@ -628,6 +663,27 @@ class CouchMateClientEntitiesView(HomeAssistantView):
             {entity["entity_id"] for entity in entities},
             full_device_ids,
         )
+        security_selection = normalize_security_dashboard(
+            selection_model.get("security_dashboard"), er.async_get(hass), hass.states
+        )
+        security_entities = {entity["entity_id"]: entity for entity in entities}
+        security_dashboard = {
+            "enabled": security_selection["enabled"],
+            "alarms": [
+                alarm_metadata(security_entities[entity_id])
+                for entity_id in security_selection["alarm_entity_ids"]
+                if entity_id in security_entities
+            ] if security_selection["enabled"] else [],
+            "camera_entity_ids": [
+                entity_id for entity_id in security_selection["camera_entity_ids"]
+                if entity_id in security_entities
+            ] if security_selection["enabled"] else [],
+            "contacts": [
+                contact_metadata(security_entities[entity_id])
+                for entity_id in security_selection["contact_entity_ids"]
+                if entity_id in security_entities
+            ] if security_selection["enabled"] else [],
+        }
         explicit_entity_ids = list(dict.fromkeys([
             *explicit_entity_ids,
             *(
@@ -637,6 +693,26 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                 for entity_id in appliance["sensor_entity_ids"].values()
             ),
         ]))
+        # Clients build rooms from `entities`, not just the `areas` list.
+        # Tell them which sources came solely from the optional dashboard so
+        # an area-assigned door camera does not create an ordinary room card.
+        from . import _resolve_filter
+        regular_entity_ids = _resolve_filter(
+            hass,
+            areas=list(hass.data[DOMAIN].get("areas", [])),
+            devices=full_device_ids,
+            entities=list(hass.data[DOMAIN].get("explicit_entities", [])),
+            excluded_entities=list(hass.data[DOMAIN].get("excluded_entities", [])),
+        )
+        security_only_entity_ids = (
+            {
+                entity_id
+                for field in ("alarm_entity_ids", "camera_entity_ids", "contact_entity_ids")
+                for entity_id in security_selection[field]
+                if entity_id in security_entities
+            }
+            - regular_entity_ids
+        )
 
         # Send the exact Home Assistant areas that belong to the exposed
         # entities. This guarantees that an individually selected entity
@@ -644,6 +720,8 @@ class CouchMateClientEntitiesView(HomeAssistantView):
         # from that area.
         areas_by_id: dict[str, dict[str, str]] = {}
         for entity in entities:
+            if entity["entity_id"] in security_only_entity_ids:
+                continue
             area_id = entity.get("area_id")
             area_name = entity.get("area_name")
             if area_id and area_name:
@@ -760,6 +838,7 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                     _LOGGER.debug("Unable to load daily weather forecast for %s: %s", weather_entity_id, err)
 
         screenshot_request = _diagnostics(hass).pending_for_target(client_id)
+        energy_dashboard = await async_energy_dashboard_payload(hass, selection_model)
 
         return web.json_response(
             {
@@ -767,6 +846,9 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                 "weather": weather,
                 "entities": entities,
                 "washdata_appliances": washdata_appliances,
+                "energy_dashboard": energy_dashboard,
+                "security_dashboard": security_dashboard,
+                "security_only_entity_ids": sorted(security_only_entity_ids),
                 "areas": sorted(areas_by_id.values(), key=lambda item: item["name"].casefold()),
                 "room_temperature_entity_ids": room_temperature_ids,
                 "room_temperatures": room_temperatures,
@@ -820,6 +902,9 @@ class CouchMateClientSnapshotView(HomeAssistantView):
             return web.json_response({"error": "invalid_image_entity"}, status=400)
         if entity_id not in set(_effective_client_entity_ids(hass)):
             return web.json_response({"error": "entity_not_selected"}, status=403)
+        entry = er.async_get(hass).async_get(entity_id)
+        if entry is not None and entry.disabled:
+            return web.json_response({"error": "entity_not_found"}, status=404)
         if hass.states.get(entity_id) is None:
             return web.json_response({"error": "entity_not_found"}, status=404)
 
@@ -878,6 +963,9 @@ class CouchMateClientStreamView(HomeAssistantView):
             return web.json_response({"error": "invalid_camera"}, status=400)
         if entity_id not in set(_effective_client_entity_ids(hass)):
             return web.json_response({"error": "entity_not_selected"}, status=403)
+        entry = er.async_get(hass).async_get(entity_id)
+        if entry is not None and entry.disabled:
+            return web.json_response({"error": "entity_not_found"}, status=404)
         if hass.states.get(entity_id) is None:
             return web.json_response({"error": "entity_not_found"}, status=404)
 
@@ -928,6 +1016,7 @@ _ALLOWED_SERVICES: dict[str, set[str]] = {
     "scene": {"turn_on"},
     "script": {"turn_on"},
     "timer": {"start", "pause", "cancel", "finish", "change"},
+    "alarm_control_panel": set(ALARM_SERVICES),
 }
 
 
@@ -998,6 +1087,28 @@ class CouchMateClientServiceView(HomeAssistantView):
         if not entity_ids:
             return web.json_response({"error": "missing_entity_ids"}, status=400)
 
+        if domain == "alarm_control_panel":
+            # The regular room/device whitelist is not sufficient for a
+            # security-sensitive action. A panel must be explicitly enabled
+            # in the security dashboard, and calls always target one panel.
+            selection = configured_security_dashboard(
+                hass.data.get(DOMAIN, {}).get("selection_model", {})
+            )
+            if (
+                not selection["enabled"]
+                or len(entity_ids) != 1
+                or entity_ids[0] not in selection["alarm_entity_ids"]
+            ):
+                return web.json_response({"error": "alarm_not_selected"}, status=403)
+            entry = er.async_get(hass).async_get(entity_ids[0])
+            state = hass.states.get(entity_ids[0])
+            if not valid_security_entity(entity_ids[0], "alarm", entry, state):
+                return web.json_response({"error": "alarm_unavailable"}, status=409)
+            validated_data = validate_alarm_action(service, service_data, state)
+            if validated_data is None:
+                return web.json_response({"error": "alarm_action_not_available_or_code_required"}, status=400)
+            service_data = validated_data
+
         # Use the same effective boundary as the entities endpoint. Anything
         # displayed as a controllable client entity must also be authorized.
         selected = set(_effective_client_entity_ids(hass))
@@ -1023,6 +1134,10 @@ class CouchMateClientServiceView(HomeAssistantView):
                 target={"entity_id": entity_ids},
             )
         except Exception as err:  # noqa: BLE001
+            if domain == "alarm_control_panel":
+                # HA integrations can put submitted codes in exception text.
+                # Do not echo the message or log an exception traceback.
+                return web.json_response({"error": "alarm_action_failed"}, status=422)
             _LOGGER.exception("CouchMate service call failed for client %s", client_id)
             return web.json_response({"error": "service_call_failed", "message": str(err)}, status=500)
 
