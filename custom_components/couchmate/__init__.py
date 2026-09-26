@@ -38,6 +38,7 @@ from .const import (
     PAIRING_CLIENT_STORAGE_VERSION,
 )
 from .storage import async_load_entities, async_save_entities
+from .washdata import washdata_sensor_entity_ids
 from .pairing import PairingManager
 from .const import PAIRING_MANAGER
 
@@ -180,6 +181,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         for entity_id in area_cfg.get("timer_entities", [])
                         if isinstance(entity_id, str) and entity_id.startswith("timer.")
                     )
+                    device_registry = dr.async_get(hass)
+                    entity_registry = er.async_get(hass)
+                    for device_id in area_cfg.get("washdata_devices", []):
+                        device = device_registry.async_get(device_id)
+                        if device is not None:
+                            stored_entities.extend(
+                                washdata_sensor_entity_ids(device, entity_registry).values()
+                            )
                     for device_id, device_cfg in dict(area_cfg.get("devices", {})).items():
                         if not isinstance(device_cfg, dict):
                             continue

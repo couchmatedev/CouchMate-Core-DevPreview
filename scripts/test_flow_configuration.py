@@ -193,6 +193,117 @@ class FlowConfigurationTests(unittest.IsolatedAsyncioTestCase):
         timer = next(item for item in response["entities"] if item["entity_id"] == "timer.cooking")
         self.assertEqual(timer["area_id"], "kitchen")
 
+    def add_washdata_device(self, *, device_id="washer", area_id=None, entry_id="wash-entry"):
+        device = SimpleNamespace(
+            id=device_id, area_id=area_id, identifiers={("ha_washdata", entry_id)},
+            name="Washing Machine", name_by_user=None, manufacturer="WashData", model=None,
+        )
+        self.hass.device_registry.devices[device_id] = device
+        now = datetime.now(timezone.utc)
+        for role, key, state in (
+            ("state", "washer_state", "running"),
+            ("program", "washer_program", "Cotton"),
+            ("time_remaining", "time_remaining", "23"),
+            ("cycle_progress", "cycle_progress", "62"),
+            ("current_phase", "current_phase", "Rinse"),
+            ("total_duration", "total_duration", "60"),
+        ):
+            # Deliberately renamed entity IDs: the Core must use unique IDs.
+            entity_id = f"sensor.custom_{device_id}_{role}"
+            self.hass.entity_registry.entities[entity_id] = SimpleNamespace(
+                entity_id=entity_id, device_id=device_id, area_id=None,
+                unique_id=f"{entry_id}_{key}", platform="ha_washdata",
+                disabled=False, name=None, original_name=None, icon=None,
+                original_icon=None, device_class=None, unit_of_measurement=None,
+            )
+            self.states[entity_id] = SimpleNamespace(
+                entity_id=entity_id, name=role, state=state,
+                attributes={"unit_of_measurement": "min" if role in ("time_remaining", "total_duration") else None},
+                last_changed=now, last_updated=now,
+            )
+        return device
+
+    async def test_area_less_washdata_group_survives_restart_and_maps_renamed_sensors(self):
+        self.add_washdata_device()
+        data = await fixtures.CONFIGURATOR.CouchMateConfiguratorDataView().get(
+            fixtures.Request(self.hass, {})
+        )
+        kitchen = next(area for area in data["areas"] if area["id"] == "kitchen")
+        self.assertEqual(kitchen["washdata_candidates"], [{
+            "device_id": "washer", "name": "Washing Machine", "area_unassigned": True,
+        }])
+        self.payload["selection_model"]["areas"]["kitchen"] = {
+            "washdata_devices": ["washer"], "devices": {},
+        }
+        await self.save()
+        await CORE.async_unload_entry(self.hass, self.entry)
+        await CORE.async_setup_entry(self.hass, self.entry)
+        response = await self.client_response()
+        self.assertEqual(len(response["washdata_appliances"]), 1)
+        appliance = response["washdata_appliances"][0]
+        self.assertEqual(appliance["name"], "Washing Machine")
+        self.assertEqual(appliance["area_id"], "kitchen")
+        self.assertEqual(appliance["sensor_entity_ids"]["time_remaining"], "sensor.custom_washer_time_remaining")
+        self.assertEqual(appliance["sensor_entity_ids"]["state"], "sensor.custom_washer_state")
+        self.assertEqual(len(appliance["sensor_entity_ids"]), 6)
+        self.assertIn("sensor.custom_washer_time_remaining", response["explicit_entity_ids"])
+        self.assertIn("sensor.custom_washer_time_remaining", [item["entity_id"] for item in response["entities"]])
+        self.assertTrue(all(item["area_id"] == "kitchen" for item in response["entities"]))
+
+    async def test_washdata_selection_rejects_other_integration_and_foreign_room(self):
+        self.add_washdata_device(device_id="foreign", area_id="garden")
+        plain = self.add_washdata_device(device_id="not_washdata")
+        plain.identifiers = {("other_integration", "wash-entry")}
+        self.payload["selection_model"]["areas"]["kitchen"] = {
+            "washdata_devices": ["foreign", "not_washdata", "missing"],
+            "devices": {},
+        }
+        await self.save()
+        self.assertNotIn("washdata_devices", self.entry.data[CORE.CONF_SELECTION_MODEL]["areas"].get("kitchen", {}))
+        self.assertEqual((await self.client_response())["washdata_appliances"], [])
+
+    async def test_unassigned_washdata_device_can_be_selected_once(self):
+        self.add_washdata_device()
+        self.hass.area_registry.areas["living"] = SimpleNamespace(id="living", name="Living")
+        self.payload["selection_model"]["areas"] = {
+            "kitchen": {"washdata_devices": ["washer"], "devices": {}},
+            "living": {"washdata_devices": ["washer"], "devices": {}},
+        }
+        await self.save()
+        saved = self.entry.data[CORE.CONF_SELECTION_MODEL]["areas"]
+        self.assertEqual(saved["kitchen"]["washdata_devices"], ["washer"])
+        self.assertNotIn("washdata_devices", saved.get("living", {}))
+        self.assertEqual((await self.client_response())["washdata_appliances"][0]["area_id"], "kitchen")
+
+    async def test_area_assigned_full_washdata_device_has_role_map(self):
+        self.add_washdata_device(area_id="kitchen")
+        self.payload["selection_model"]["areas"]["kitchen"] = {
+            "devices": {"washer": {"mode": "all", "entities": []}},
+        }
+        await self.save()
+        response = await self.client_response()
+        appliance = response["washdata_appliances"][0]
+        self.assertEqual(appliance["area_id"], "kitchen")
+        self.assertEqual(appliance["sensor_entity_ids"]["program"], "sensor.custom_washer_program")
+        self.assertIn("washer", response["full_device_ids"])
+
+    async def test_newly_enabled_washdata_sensor_appears_without_resaving(self):
+        self.add_washdata_device()
+        phase = self.hass.entity_registry.entities["sensor.custom_washer_current_phase"]
+        phase.disabled = True
+        self.payload["selection_model"]["areas"]["kitchen"] = {
+            "washdata_devices": ["washer"], "devices": {},
+        }
+        await self.save()
+        self.assertNotIn("current_phase", (await self.client_response())["washdata_appliances"][0]["sensor_entity_ids"])
+        phase.disabled = False
+        response = await self.client_response()
+        self.assertEqual(
+            response["washdata_appliances"][0]["sensor_entity_ids"]["current_phase"],
+            "sensor.custom_washer_current_phase",
+        )
+        self.assertIn("sensor.custom_washer_current_phase", response["explicit_entity_ids"])
+
     async def test_timer_service_whitelist_and_duration_validation(self):
         self.add_timer()
         self.payload["selection_model"]["areas"]["kitchen"] = {

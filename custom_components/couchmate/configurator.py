@@ -25,6 +25,7 @@ from .const import (
 from .storage import async_save_entities
 from .page_layout import render_page
 from .flow import normalize_flow_mode
+from .washdata import washdata_entry_id, washdata_sensor_entity_ids
 
 
 def _name(entry, state, fallback):
@@ -179,6 +180,7 @@ class CouchMateConfiguratorDataView(HomeAssistantView):
         for area in sorted(areas.areas.values(), key=lambda x: x.name.casefold()):
             area_devices = []
             timer_candidates = []
+            washdata_candidates = []
             temperature_candidates = []
             humidity_candidates = []
             climate_candidates = []
@@ -262,6 +264,18 @@ class CouchMateConfiguratorDataView(HomeAssistantView):
                     "selected_count": sum(1 for item in device_entities if item["selected"]),
                     "entities": sorted(device_entities, key=lambda x: x["name"].casefold()),
                 })
+            # A WashData appliance may have no HA area. Select its display
+            # sensors as one group without moving the device in Home Assistant.
+            for device in devices.devices.values():
+                if washdata_entry_id(device) is None or device.area_id not in (None, area.id):
+                    continue
+                if not washdata_sensor_entity_ids(device, entities):
+                    continue
+                washdata_candidates.append({
+                    "device_id": device.id,
+                    "name": device.name_by_user or device.name or device.id,
+                    "area_unassigned": device.area_id is None,
+                })
             result_areas.append({
                 "id": area.id,
                 "name": area.name,
@@ -296,6 +310,13 @@ class CouchMateConfiguratorDataView(HomeAssistantView):
                 ),
                 "timer_candidates": sorted(
                     timer_candidates,
+                    key=lambda x: x["name"].casefold(),
+                ),
+                "washdata_devices": list(
+                    dict(model_areas.get(area.id, {})).get("washdata_devices", [])
+                ),
+                "washdata_candidates": sorted(
+                    washdata_candidates,
                     key=lambda x: x["name"].casefold(),
                 ),
                 "hero_layout": hero_layouts.get(area.id, {}),
@@ -341,6 +362,7 @@ class CouchMateConfiguratorSaveView(HomeAssistantView):
         hero_orders = _default_profile_hero_orders(hass)
         hero_layouts = _default_profile_hero_layouts(hass)
         assigned_timers: set[str] = set()
+        assigned_washdata_devices: set[str] = set()
 
         thermostat_card_style = raw_model.get("thermostat_card_style", "full")
         if thermostat_card_style not in ("ring", "full_vertical", "full", "compact", "hidden"):
@@ -496,6 +518,28 @@ class CouchMateConfiguratorSaveView(HomeAssistantView):
                 area_cfg["timer_entities"] = valid_timers
                 explicit_entities.extend(valid_timers)
 
+            valid_washdata_devices: list[str] = []
+            raw_washdata_devices = raw_area.get("washdata_devices", [])
+            if isinstance(raw_washdata_devices, list):
+                for raw_device_id in raw_washdata_devices:
+                    if not isinstance(raw_device_id, str) or raw_device_id in assigned_washdata_devices:
+                        continue
+                    device = device_registry.async_get(raw_device_id)
+                    if (
+                        device is None
+                        or device.area_id not in (None, area_id)
+                        or washdata_entry_id(device) is None
+                    ):
+                        continue
+                    sensors = washdata_sensor_entity_ids(device, entity_registry)
+                    if not sensors:
+                        continue
+                    valid_washdata_devices.append(raw_device_id)
+                    assigned_washdata_devices.add(raw_device_id)
+                    explicit_entities.extend(sensors.values())
+            if valid_washdata_devices:
+                area_cfg["washdata_devices"] = valid_washdata_devices
+
             raw_hero_layout = raw_area.get("hero_layout", {})
             if isinstance(raw_hero_layout, dict):
                 allowed_layout_styles = {
@@ -515,7 +559,7 @@ class CouchMateConfiguratorSaveView(HomeAssistantView):
                 if hero_layout:
                     hero_layouts[area_id] = hero_layout
 
-            if area_cfg.get("temperature") or area_cfg.get("humidity") or area_cfg.get("climate") or area_cfg.get("thermostat_card_style") or area_cfg.get("hero_order") or area_cfg.get("flow_entities") or area_cfg.get("hero_right_entities") or area_cfg.get("timer_entities") or area_cfg["flow_mode"] != "automatic" or area_cfg["devices"]:
+            if area_cfg.get("temperature") or area_cfg.get("humidity") or area_cfg.get("climate") or area_cfg.get("thermostat_card_style") or area_cfg.get("hero_order") or area_cfg.get("flow_entities") or area_cfg.get("hero_right_entities") or area_cfg.get("timer_entities") or area_cfg.get("washdata_devices") or area_cfg["flow_mode"] != "automatic" or area_cfg["devices"]:
                 model_areas[area_id] = area_cfg
 
         selected_devices = list(dict.fromkeys(selected_devices))
@@ -616,6 +660,7 @@ HTML = r'''<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name
 <div id="temperaturePanel" class="config-panel"><h3>Raumtemperatur</h3><p class="sub">Eine explizite Quelle überschreibt den Istwert des Thermostats.</p><div id="temperatureGrid" class="choice-grid"></div></div>
 <div id="humidityPanel" class="config-panel"><h3>Luftfeuchtigkeit</h3><p class="sub">Eine explizite Quelle überschreibt die Luftfeuchte des Thermostats.</p><div id="humidityGrid" class="choice-grid"></div></div>
 <div id="timerPanel" class="config-panel"><h3>Timer</h3><p class="sub">Wähle Home-Assistant-Timer für diesen Raum. Timer ohne Home-Assistant-Bereich kannst du hier genau einem Raum zuordnen.</p><div id="timerGrid" class="entities"></div><p id="timerEmpty" class="sub hidden">Keine Timer-Helfer vorhanden. Erstelle einen Timer unter Einstellungen → Geräte &amp; Dienste → Helfer.</p></div>
+<div id="washdataPanel" class="config-panel"><h3>WashData-Geräte</h3><p class="sub">Wähle Waschmaschine, Trockner oder Spülmaschine für die Restzeit-Anzeige. Geräte ohne Home-Assistant-Bereich kannst du hier einem CouchMate-Raum zuordnen.</p><div id="washdataGrid" class="entities"></div><p id="washdataEmpty" class="sub hidden">Keine WashData-Geräte vorhanden.</p></div>
 <div id="heroOrderPanel" class="config-panel"><h3>Anordnung im Hero</h3><p class="sub">Sortiere die ausgewählten Lichter und Schalter. Dieselbe Reihenfolge kann später auch in der Companion geändert werden.</p><div id="heroOrderGrid" class="order-list"></div></div>
 
 <div id="heroRightPanel" class="config-panel"><h3>Rechter Hero-Bereich</h3><p class="sub">Eigene Lichter, Schalter, Rollläden, Szenen und Skripte unter Kamera und Mediaplayern. Ohne Auswahl bleibt der freie Bereich leer. Geräte erscheinen in zwei Spalten mit je 190 pt Breite. Überschüssige Karten bleiben über die Raumsteuerung erreichbar. XXL ist nur ohne weitere Karten in diesem Bereich verfügbar.</p><div id="heroRightSelection" class="order-list"></div><h3>Funktionen auswählen</h3><div id="heroRightGrid" class="entities"></div></div>
@@ -634,7 +679,7 @@ HTML = r'''<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name
 </div></section>
 </main><div id="toast" class="toast hidden" role="status" aria-live="polite"></div><script>
 let data,area,device,flowArea;
-const selected={devices:new Map(),temperatures:{},humidities:{},climates:{},timers:{},orders:{},right:{},flows:{},flowModes:{},layouts:{},thermostatStyle:'full',thermostatStyles:{},showRoomName:true,showRoomClimate:true,weather:null};
+const selected={devices:new Map(),temperatures:{},humidities:{},climates:{},timers:{},washdata:{},orders:{},right:{},flows:{},flowModes:{},layouts:{},thermostatStyle:'full',thermostatStyles:{},showRoomName:true,showRoomClimate:true,weather:null};
 const paths={room:'<path d="M4 10.5 12 4l8 6.5V20H4z"/><path d="M9 20v-6h6v6"/>',light:'<path d="M9 18h6"/><path d="M10 22h4"/><path d="M8.5 14.5A6 6 0 1 1 15.5 14.5c-1 .8-1.5 1.8-1.5 3h-4c0-1.2-.5-2.2-1.5-3Z"/>',switch:'<path d="M7 2v5M17 2v5"/><path d="M5 7h14v7a7 7 0 0 1-14 0Z"/><path d="M9 21h6"/>',media_player:'<rect x="3" y="5" width="18" height="13" rx="2"/><path d="m10 9 5 2.5-5 2.5Z"/><path d="M8 22h8"/>',climate:'<path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0Z"/><path d="M12 11v6"/>',cover:'<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M4 8h16M4 13h16M4 18h16"/>',sensor:'<path d="M4 19V5M4 19h16"/><path d="m7 15 3-4 3 2 5-7"/>',default:'<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M9 9h6v6H9z"/>'};
 function icon(kind){return `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[kind]||paths.default}</svg>`}
 function roomKind(name){const n=name.toLowerCase();if(n.includes('wohn'))return 'media_player';if(n.includes('küche')||n.includes('kueche'))return 'switch';if(n.includes('schlaf'))return 'light';if(n.includes('bad')||n.includes('wc'))return 'climate';if(n.includes('garten'))return 'sensor';if(n.includes('garage'))return 'cover';return 'room'}
@@ -669,7 +714,7 @@ function renderThermostatStyles(panel,grid,current,setValue,group,allowInherit){
 }
 function roomHeroLayout(a){return selected.layouts[a.id]||(selected.layouts[a.id]={device_card_style:'bubble',camera_card_style:'large',media_card_style:'transport'})}
 function renderHeroCardStyles(){const layout=roomHeroLayout(area);deviceCardStyle.value=layout.device_card_style||'bubble';cameraCardStyle.value=layout.camera_card_style||'large';mediaCardStyle.value=layout.media_card_style||'transport';deviceCardStyle.onchange=()=>layout.device_card_style=deviceCardStyle.value;cameraCardStyle.onchange=()=>layout.camera_card_style=cameraCardStyle.value;mediaCardStyle.onchange=()=>layout.media_card_style=mediaCardStyle.value}
-function areaSelectionState(a){let count=0,all=0;for(const d of a.devices){const st=deviceState(d);if(st.mode==='all')all++;else if(st.mode==='entities')count+=st.entities.size}if(all)return 'partial';if(count||selected.temperatures[a.id]||selected.humidities[a.id]||selected.climates[a.id]||selected.thermostatStyles[a.id]||(selected.timers[a.id]||[]).length||(selected.orders[a.id]||[]).length||(selected.right[a.id]||[]).length||(selected.flows[a.id]||[]).length||['custom','hidden'].includes(selected.flowModes[a.id]))return 'partial';return 'none'}
+function areaSelectionState(a){let count=0,all=0;for(const d of a.devices){const st=deviceState(d);if(st.mode==='all')all++;else if(st.mode==='entities')count+=st.entities.size}if(all)return 'partial';if(count||selected.temperatures[a.id]||selected.humidities[a.id]||selected.climates[a.id]||selected.thermostatStyles[a.id]||(selected.timers[a.id]||[]).length||(selected.washdata[a.id]||[]).length||(selected.orders[a.id]||[]).length||(selected.right[a.id]||[]).length||(selected.flows[a.id]||[]).length||['custom','hidden'].includes(selected.flowModes[a.id]))return 'partial';return 'none'}
 function deviceSelectionState(d){const st=deviceState(d);return st.mode==='all'?'all':st.mode==='entities'&&st.entities.size?'partial':'none'}
 function selectedHeroEntities(a){const result=[];for(const d of a.devices){const st=deviceState(d);for(const e of d.entities){if(!['light','switch'].includes(e.domain)||(selected.right[a.id]||[]).includes(e.entity_id))continue;if(st.mode==='all'||(st.mode==='entities'&&st.entities.has(e.entity_id)))result.push(e)}}const seen=new Set();return result.filter(e=>!seen.has(e.entity_id)&&seen.add(e.entity_id))}
 function normalizedHeroOrder(a){const candidates=selectedHeroEntities(a);const byID=new Map(candidates.map(e=>[e.entity_id,e]));const ordered=[];for(const id of selected.orders[a.id]||[]){if(byID.has(id)){ordered.push(byID.get(id));byID.delete(id)}}ordered.push(...[...byID.values()].sort((x,y)=>x.name.localeCompare(y.name)));selected.orders[a.id]=ordered.map(e=>e.entity_id);return ordered}
@@ -775,6 +820,26 @@ function renderTimerChoices(){
         timerGrid.append(row);
     }
 }
+function renderWashdataChoices(){
+    const candidates=area.washdata_candidates||[];
+    washdataGrid.innerHTML='';
+    washdataEmpty.classList.toggle('hidden',!!candidates.length);
+    for(const appliance of candidates){
+        const row=document.createElement('label');row.className='entity';
+        const assignedRoom=Object.keys(selected.washdata).find(id=>id!==area.id&&(selected.washdata[id]||[]).includes(appliance.device_id));
+        const assignment=appliance.area_unassigned?(assignedRoom?`Bisher ${data.areas.find(item=>item.id===assignedRoom)?.name||'anderem Raum'} zugeordnet`:'Ohne Home-Assistant-Bereich'):'Home-Assistant-Bereich';
+        row.innerHTML=`<input type="checkbox"><span><b>${esc(appliance.name)}</b><span class="sub">${esc(assignment)}</span></span>`;
+        const input=row.querySelector('input');input.checked=(selected.washdata[area.id]||[]).includes(appliance.device_id);
+        input.onchange=()=>{
+            if(input.checked){
+                for(const id of Object.keys(selected.washdata))selected.washdata[id]=(selected.washdata[id]||[]).filter(value=>value!==appliance.device_id);
+                selected.washdata[area.id]=[...(selected.washdata[area.id]||[]),appliance.device_id];
+            }else selected.washdata[area.id]=(selected.washdata[area.id]||[]).filter(value=>value!==appliance.device_id);
+            renderWashdataChoices();
+        };
+        washdataGrid.append(row);
+    }
+}
 function renderAreas(){
     showCoreSection('configurator');
     areas.classList.remove('hidden');devices.classList.add('hidden');entities.classList.add('hidden');
@@ -789,16 +854,17 @@ function renderAreas(){
         const selectedCount=a.devices.reduce((n,d)=>{
             const st=deviceState(d);
             return n+(st.mode==='all'?d.entities.length:st.mode==='entities'?st.entities.size:0);
-        },0)+(selected.timers[a.id]||[]).length;
+        },0)+(selected.timers[a.id]||[]).length+(selected.washdata[a.id]||[]).length;
         const timerCount=(a.timer_candidates||[]).filter(timer=>!timer.area_unassigned||(selected.timers[a.id]||[]).includes(timer.entity_id)).length;
-        const subtitle=`${a.devices.length} Geräte${timerCount?` · ${timerCount} Timer`:''}`;
+        const washdataCount=(a.washdata_candidates||[]).filter(item=>!item.area_unassigned||(selected.washdata[a.id]||[]).includes(item.device_id)).length;
+        const subtitle=`${a.devices.length} Geräte${timerCount?` · ${timerCount} Timer`:''}${washdataCount?` · ${washdataCount} WashData`:''}`;
         areaGrid.append(tile(a.name,{text:subtitle,selection:selectedCount?`${selectedCount} Funktionen gewählt`:''},roomKind(a.name),areaSelectionState(a),()=>{area=a;renderDevices()}));
     }
 }
-function renderDevices(){showCoreSection('configurator');openRoomFlow.onclick=()=>navigateCore('flow',area.id);areas.classList.add('hidden');devices.classList.remove('hidden');entities.classList.add('hidden');areaName.textContent=area.name;deviceGrid.innerHTML='';renderChoices(climatePanel,climateGrid,area.climate_candidates,selected.climates[area.id],value=>{if(value)selected.climates[area.id]=value;else delete selected.climates[area.id]},`climate-${area.id}`,'Automatisch','Einziges freigegebenes Thermostat verwenden');renderThermostatStyles(roomThermostatStylePanel,roomThermostatStyleGrid,selected.thermostatStyles[area.id]??null,value=>{if(value)selected.thermostatStyles[area.id]=value;else delete selected.thermostatStyles[area.id]},`roomThermostatStyle-${area.id}`,true);renderHeroCardStyles();renderChoices(temperaturePanel,temperatureGrid,area.temperature_candidates,selected.temperatures[area.id],value=>{if(value)selected.temperatures[area.id]=value;else delete selected.temperatures[area.id]},`temperature-${area.id}`,'Thermostat-Fallback','Istwert des Thermostats verwenden');renderChoices(humidityPanel,humidityGrid,area.humidity_candidates,selected.humidities[area.id],value=>{if(value)selected.humidities[area.id]=value;else delete selected.humidities[area.id]},`humidity-${area.id}`,'Thermostat-Fallback','Luftfeuchte des Thermostats verwenden');renderHeroOrder();renderHeroRight();renderTimerChoices();for(const d of area.devices){const domain=d.entities[0]?.domain||'default';const st=deviceState(d);const subtitle=[d.manufacturer,d.model].filter(Boolean).join(' · ')||`${d.entities.length} Funktionen`;deviceGrid.append(tile(d.name,{text:subtitle,selection:st.mode==='entities'?`${st.entities.size} ${st.entities.size===1?'Funktion':'Funktionen'} gewählt`:''},domain,deviceSelectionState(d),()=>{device=d;renderEntities()}))}}
+function renderDevices(){showCoreSection('configurator');openRoomFlow.onclick=()=>navigateCore('flow',area.id);areas.classList.add('hidden');devices.classList.remove('hidden');entities.classList.add('hidden');areaName.textContent=area.name;deviceGrid.innerHTML='';renderChoices(climatePanel,climateGrid,area.climate_candidates,selected.climates[area.id],value=>{if(value)selected.climates[area.id]=value;else delete selected.climates[area.id]},`climate-${area.id}`,'Automatisch','Einziges freigegebenes Thermostat verwenden');renderThermostatStyles(roomThermostatStylePanel,roomThermostatStyleGrid,selected.thermostatStyles[area.id]??null,value=>{if(value)selected.thermostatStyles[area.id]=value;else delete selected.thermostatStyles[area.id]},`roomThermostatStyle-${area.id}`,true);renderHeroCardStyles();renderChoices(temperaturePanel,temperatureGrid,area.temperature_candidates,selected.temperatures[area.id],value=>{if(value)selected.temperatures[area.id]=value;else delete selected.temperatures[area.id]},`temperature-${area.id}`,'Thermostat-Fallback','Istwert des Thermostats verwenden');renderChoices(humidityPanel,humidityGrid,area.humidity_candidates,selected.humidities[area.id],value=>{if(value)selected.humidities[area.id]=value;else delete selected.humidities[area.id]},`humidity-${area.id}`,'Thermostat-Fallback','Luftfeuchte des Thermostats verwenden');renderHeroOrder();renderHeroRight();renderTimerChoices();renderWashdataChoices();for(const d of area.devices){const domain=d.entities[0]?.domain||'default';const st=deviceState(d);const subtitle=[d.manufacturer,d.model].filter(Boolean).join(' · ')||`${d.entities.length} Funktionen`;deviceGrid.append(tile(d.name,{text:subtitle,selection:st.mode==='entities'?`${st.entities.size} ${st.entities.size===1?'Funktion':'Funktionen'} gewählt`:''},domain,deviceSelectionState(d),()=>{device=d;renderEntities()}))}}
 function renderEntities(){devices.classList.add('hidden');entities.classList.remove('hidden');deviceName.textContent=`${area.name} · ${device.name}`;entityGrid.innerHTML='';let st=deviceState(device);selectWholeDevice.checked=st.mode==='all';selectWholeDevice.onchange=()=>{if(selectWholeDevice.checked)setDeviceState(device.id,{mode:'all',entities:new Set()});else setDeviceState(device.id,{mode:'none',entities:new Set()});renderEntities()};for(const e of device.entities){st=deviceState(device);const row=document.createElement('label');row.className='entity';row.innerHTML=`<input type="checkbox" ${(st.mode==='all'||(st.mode==='entities'&&st.entities.has(e.entity_id)))?'checked':''} ${st.mode==='all'?'disabled':''}><span><b>${esc(e.name)}</b><span class="sub">${esc(e.entity_id)}</span></span>`;const c=row.querySelector('input');c.onchange=()=>{const current=deviceState(device);const ids=current.mode==='entities'?new Set(current.entities):new Set();if(c.checked)ids.add(e.entity_id);else ids.delete(e.entity_id);setDeviceState(device.id,{mode:'entities',entities:ids})};entityGrid.append(row)}}
-function buildSelectionModel(){const model={version:2,weather:selected.weather,thermostat_card_style:selected.thermostatStyle,show_room_name:selected.showRoomName,show_room_climate:selected.showRoomClimate,areas:{}};for(const a of data.areas){const cfg={devices:{}};const flowMode=selected.flowModes[a.id]||'automatic';if(flowMode!=='automatic')cfg.flow_mode=flowMode;if(selected.temperatures[a.id])cfg.temperature=selected.temperatures[a.id];if(selected.humidities[a.id])cfg.humidity=selected.humidities[a.id];if(selected.climates[a.id])cfg.climate=selected.climates[a.id];if(selected.thermostatStyles[a.id])cfg.thermostat_card_style=selected.thermostatStyles[a.id];cfg.hero_layout={...roomHeroLayout(a),thermostat_card_style:selected.thermostatStyles[a.id]??selected.thermostatStyle};const order=normalizedHeroOrder(a).map(e=>e.entity_id);if(order.length)cfg.hero_order=order;const right=(selected.right[a.id]||[]).slice(0,12);if(right.length)cfg.hero_right_entities=right;const flow=(selected.flows[a.id]||[]).slice(0,3);if(flow.length)cfg.flow_entities=flow;const timers=[...new Set(selected.timers[a.id]||[])];if(timers.length)cfg.timer_entities=timers;for(const d of a.devices){const st=deviceState(d);if(st.mode==='all')cfg.devices[d.id]={mode:'all',entities:[]};else if(st.mode==='entities'&&st.entities.size)cfg.devices[d.id]={mode:'entities',entities:[...st.entities]}}if(cfg.temperature||cfg.humidity||cfg.climate||cfg.thermostat_card_style||cfg.hero_order||cfg.hero_right_entities||cfg.flow_entities||cfg.timer_entities||cfg.flow_mode||Object.keys(cfg.devices).length)model.areas[a.id]=cfg}return model}
-api('/api/couchmate/configurator/data').then(r=>r.json()).then(j=>{data=j;selected.weather=j.weather_entity??null;selected.thermostatStyle=j.thermostat_card_style??'full';selected.showRoomName=j.show_room_name??true;selected.showRoomClimate=j.show_room_climate??true;for(const a of data.areas){if(a.temperature_entity)selected.temperatures[a.id]=a.temperature_entity;if(a.humidity_entity)selected.humidities[a.id]=a.humidity_entity;if(a.climate_entity)selected.climates[a.id]=a.climate_entity;const heroLayout=a.hero_layout||{};selected.layouts[a.id]={device_card_style:heroLayout.device_card_style||'bubble',camera_card_style:heroLayout.camera_card_style||'large',media_card_style:heroLayout.media_card_style||'transport'};if(heroLayout.thermostat_card_style)selected.thermostatStyles[a.id]=heroLayout.thermostat_card_style;else if(a.thermostat_card_style)selected.thermostatStyles[a.id]=a.thermostat_card_style;selected.orders[a.id]=a.hero_order||[];selected.right[a.id]=[...new Set(a.hero_right_entities||[])].slice(0,12);selected.flows[a.id]=[...new Set(a.flow_entities||[])].slice(0,3);selected.timers[a.id]=[...new Set(a.timer_entities||[])];selected.flowModes[a.id]=['automatic','custom','hidden'].includes(a.flow_mode)?a.flow_mode:'automatic';for(const d of a.devices){const ids=new Set(d.entities.filter(e=>e.selected).map(e=>e.entity_id));if(d.selection_mode==='all')selected.devices.set(d.id,{mode:'all',entities:new Set()});else if(ids.size)selected.devices.set(d.id,{mode:'entities',entities:ids})}}if(new URL(location.href).searchParams.get('section')==='flow')renderFlowPage();else renderAreas()}).catch(e=>showToast('error','Konfigurator konnte nicht geladen werden',e.message==='AUTH'?'Öffne die Seite im selben Browser, in dem du bei Home Assistant angemeldet bist.':e.message));
+function buildSelectionModel(){const model={version:2,weather:selected.weather,thermostat_card_style:selected.thermostatStyle,show_room_name:selected.showRoomName,show_room_climate:selected.showRoomClimate,areas:{}};for(const a of data.areas){const cfg={devices:{}};const flowMode=selected.flowModes[a.id]||'automatic';if(flowMode!=='automatic')cfg.flow_mode=flowMode;if(selected.temperatures[a.id])cfg.temperature=selected.temperatures[a.id];if(selected.humidities[a.id])cfg.humidity=selected.humidities[a.id];if(selected.climates[a.id])cfg.climate=selected.climates[a.id];if(selected.thermostatStyles[a.id])cfg.thermostat_card_style=selected.thermostatStyles[a.id];cfg.hero_layout={...roomHeroLayout(a),thermostat_card_style:selected.thermostatStyles[a.id]??selected.thermostatStyle};const order=normalizedHeroOrder(a).map(e=>e.entity_id);if(order.length)cfg.hero_order=order;const right=(selected.right[a.id]||[]).slice(0,12);if(right.length)cfg.hero_right_entities=right;const flow=(selected.flows[a.id]||[]).slice(0,3);if(flow.length)cfg.flow_entities=flow;const timers=[...new Set(selected.timers[a.id]||[])];if(timers.length)cfg.timer_entities=timers;const washdata=[...new Set(selected.washdata[a.id]||[])];if(washdata.length)cfg.washdata_devices=washdata;for(const d of a.devices){const st=deviceState(d);if(st.mode==='all')cfg.devices[d.id]={mode:'all',entities:[]};else if(st.mode==='entities'&&st.entities.size)cfg.devices[d.id]={mode:'entities',entities:[...st.entities]}}if(cfg.temperature||cfg.humidity||cfg.climate||cfg.thermostat_card_style||cfg.hero_order||cfg.hero_right_entities||cfg.flow_entities||cfg.timer_entities||cfg.washdata_devices||cfg.flow_mode||Object.keys(cfg.devices).length)model.areas[a.id]=cfg}return model}
+api('/api/couchmate/configurator/data').then(r=>r.json()).then(j=>{data=j;selected.weather=j.weather_entity??null;selected.thermostatStyle=j.thermostat_card_style??'full';selected.showRoomName=j.show_room_name??true;selected.showRoomClimate=j.show_room_climate??true;for(const a of data.areas){if(a.temperature_entity)selected.temperatures[a.id]=a.temperature_entity;if(a.humidity_entity)selected.humidities[a.id]=a.humidity_entity;if(a.climate_entity)selected.climates[a.id]=a.climate_entity;const heroLayout=a.hero_layout||{};selected.layouts[a.id]={device_card_style:heroLayout.device_card_style||'bubble',camera_card_style:heroLayout.camera_card_style||'large',media_card_style:heroLayout.media_card_style||'transport'};if(heroLayout.thermostat_card_style)selected.thermostatStyles[a.id]=heroLayout.thermostat_card_style;else if(a.thermostat_card_style)selected.thermostatStyles[a.id]=a.thermostat_card_style;selected.orders[a.id]=a.hero_order||[];selected.right[a.id]=[...new Set(a.hero_right_entities||[])].slice(0,12);selected.flows[a.id]=[...new Set(a.flow_entities||[])].slice(0,3);selected.timers[a.id]=[...new Set(a.timer_entities||[])];selected.washdata[a.id]=[...new Set(a.washdata_devices||[])];selected.flowModes[a.id]=['automatic','custom','hidden'].includes(a.flow_mode)?a.flow_mode:'automatic';for(const d of a.devices){const ids=new Set(d.entities.filter(e=>e.selected).map(e=>e.entity_id));if(d.selection_mode==='all')selected.devices.set(d.id,{mode:'all',entities:new Set()});else if(ids.size)selected.devices.set(d.id,{mode:'entities',entities:ids})}}if(new URL(location.href).searchParams.get('section')==='flow')renderFlowPage();else renderAreas()}).catch(e=>showToast('error','Konfigurator konnte nicht geladen werden',e.message==='AUTH'?'Öffne die Seite im selben Browser, in dem du bei Home Assistant angemeldet bist.':e.message));
 document.querySelectorAll('.nav a[data-core-section]').forEach(link=>{if(link.dataset.coreSection==='management')return;link.onclick=event=>{if(!data)return;event.preventDefault();navigateCore(link.dataset.coreSection)}});
 window.addEventListener('popstate',()=>{if(!data)return;if(new URL(location.href).searchParams.get('section')==='flow')renderFlowPage();else renderAreas()});
 backAreas.onclick=renderAreas;backDevices.onclick=renderDevices;save.onclick=async()=>{save.disabled=true;save.textContent='Speichert …';showToast('', 'Auswahl wird gespeichert','Bitte einen Moment warten.');try{const r=await api('/api/couchmate/configurator/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({selection_model:buildSelectionModel()})});const j=await r.json();if(!j.success)throw new Error('Unbekannter Speicherfehler');showToast('ok','Auswahl erfolgreich gespeichert',`${j.area_count} Räume · ${j.entity_count} einzelne Funktionen · ${j.climate_count} Thermostate · Wetter ${j.weather_configured?'fest gewählt':'automatisch'}`)}catch(e){showToast('error','Speichern fehlgeschlagen',e.message==='AUTH'?'Die Home-Assistant-Anmeldung ist abgelaufen. Bitte Home Assistant neu laden.':e.message)}finally{save.disabled=false;save.textContent='Auswahl speichern'}};

@@ -30,6 +30,7 @@ from .diagnostics import DiagnosticsManager, SCREENSHOT_MAX_BYTES
 from .flow import flow_modes_for_selection
 from .pairing import PairingManager, PairingStatus
 from .storage import async_save_entities
+from .washdata import selected_washdata_rooms, washdata_entry_id, washdata_sensor_entity_ids
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -133,6 +134,12 @@ def _entity_payload(hass: HomeAssistant, entity_id: str) -> dict[str, Any] | Non
     entry = ent_reg.async_get(entity_id)
     device = dev_reg.async_get(entry.device_id) if entry and entry.device_id else None
     area_id = (entry.area_id if entry else None) or (device.area_id if device else None)
+    if device is not None and washdata_entry_id(device) is not None:
+        # A room-local WashData pick is a CouchMate assignment. It does not
+        # mutate the device or the individual sensors in Home Assistant.
+        area_id = selected_washdata_rooms(
+            hass.data.get(DOMAIN, {}).get("selection_model", {})
+        ).get(device.id, area_id)
     if area_id is None and entity_id.startswith("timer."):
         # Helpers need not belong to a HA area. The configurator can assign
         # such a timer to exactly one CouchMate room without changing HA.
@@ -195,6 +202,14 @@ def _effective_client_entity_ids(hass: HomeAssistant) -> list[str]:
         for entity_id in area_cfg["timer_entities"]
         if isinstance(entity_id, str) and entity_id.startswith("timer.")
     ]
+    entity_registry = er.async_get(hass)
+    device_registry = dr.async_get(hass)
+    configured_washdata_entity_ids = [
+        entity_id
+        for device_id in selected_washdata_rooms(selection_model)
+        if (device := device_registry.async_get(device_id)) is not None
+        for entity_id in washdata_sensor_entity_ids(device, entity_registry).values()
+    ]
 
     # Resolve registry-backed selections for every client snapshot instead of
     # relying on the flattened list created when Core started or the selection
@@ -211,8 +226,6 @@ def _effective_client_entity_ids(hass: HomeAssistant) -> list[str]:
         excluded_entities=excluded_entity_ids,
     ))
 
-    entity_registry = er.async_get(hass)
-    device_registry = dr.async_get(hass)
     full_device_entity_ids = [
         entry.entity_id
         for entry in entity_registry.entities.values()
@@ -245,6 +258,7 @@ def _effective_client_entity_ids(hass: HomeAssistant) -> list[str]:
         *room_climate_ids.values(),
         *configured_flow_entity_ids,
         *configured_timer_entity_ids,
+        *configured_washdata_entity_ids,
     ]))
 
     # Weather is configured once for the global dashboard header. It must not
@@ -255,6 +269,43 @@ def _effective_client_entity_ids(hass: HomeAssistant) -> list[str]:
         for entity_id in effective_entity_ids
         if not entity_id.startswith("weather.")
     ]
+
+
+def _washdata_appliance_payloads(
+    hass: HomeAssistant,
+    exposed_entity_ids: set[str],
+    full_device_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Describe selected WashData appliances with rename-safe sensor roles."""
+    selection_model = hass.data.get(DOMAIN, {}).get("selection_model", {})
+    room_by_device = selected_washdata_rooms(selection_model)
+    device_registry = dr.async_get(hass)
+    entity_registry = er.async_get(hass)
+    area_registry = ar.async_get(hass)
+    result = []
+    for device_id in sorted(set(room_by_device) | set(full_device_ids)):
+        device = device_registry.async_get(device_id)
+        if device is None or washdata_entry_id(device) is None:
+            continue
+        area_id = room_by_device.get(device_id) or device.area_id
+        area = area_registry.async_get_area(area_id) if area_id else None
+        if area is None:
+            continue
+        sensors = {
+            key: entity_id
+            for key, entity_id in washdata_sensor_entity_ids(device, entity_registry).items()
+            if entity_id in exposed_entity_ids
+        }
+        if not sensors:
+            continue
+        result.append({
+            "device_id": device_id,
+            "name": device.name_by_user or device.name or device_id,
+            "area_id": area_id,
+            "area_name": area.name,
+            "sensor_entity_ids": sensors,
+        })
+    return sorted(result, key=lambda item: (item["area_name"].casefold(), item["name"].casefold()))
 
 
 def _resolved_room_climate_ids(
@@ -572,6 +623,21 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                 _LOGGER.exception("Unable to serialize CouchMate client entity %s", entity_id)
                 skipped.append(f"{entity_id}: {err}")
 
+        washdata_appliances = _washdata_appliance_payloads(
+            hass,
+            {entity["entity_id"] for entity in entities},
+            full_device_ids,
+        )
+        explicit_entity_ids = list(dict.fromkeys([
+            *explicit_entity_ids,
+            *(
+                entity_id
+                for appliance in washdata_appliances
+                if appliance["device_id"] not in full_device_ids
+                for entity_id in appliance["sensor_entity_ids"].values()
+            ),
+        ]))
+
         # Send the exact Home Assistant areas that belong to the exposed
         # entities. This guarantees that an individually selected entity
         # creates its room in CouchMate without exposing every other entity
@@ -700,6 +766,7 @@ class CouchMateClientEntitiesView(HomeAssistantView):
                 "client_id": client_id,
                 "weather": weather,
                 "entities": entities,
+                "washdata_appliances": washdata_appliances,
                 "areas": sorted(areas_by_id.values(), key=lambda item: item["name"].casefold()),
                 "room_temperature_entity_ids": room_temperature_ids,
                 "room_temperatures": room_temperatures,
