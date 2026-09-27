@@ -297,6 +297,7 @@ class CouchMateConfiguratorDataView(HomeAssistantView):
             result_areas.append({
                 "id": area.id,
                 "name": area.name,
+                "icon": getattr(area, "icon", None),
                 "selected": bool(model_areas.get(area.id)) or bool(room_temperatures.get(area.id)) or bool(room_humidities.get(area.id)) or bool(room_climates.get(area.id)),
                 "temperature_entity": room_temperatures.get(area.id),
                 "temperature_candidates": sorted(temperature_candidates, key=lambda x: x["name"].casefold()),
@@ -680,10 +681,33 @@ HTML = r'''<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name
 </style><style>
 .flow-entry,.flow-content-heading{display:flex;align-items:center;justify-content:space-between;gap:20px}.flow-content-heading h2{margin:0}.flow-content-heading{margin-bottom:12px}.flow-entry .button{flex-shrink:0}.button.secondary{background:var(--card2);color:#fff;border:1px solid var(--line)}.flow-room-label{display:block;font-size:19px;font-weight:700}.flow-mode-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.flow-mode-grid .choice:has(input:checked){outline:2px solid var(--accent);background:#172523}.flow-preview{margin-top:24px;padding:20px;border:1px dashed var(--line);border-radius:18px;text-align:center}.flow-preview-hero{padding:20px;border-radius:12px;background:var(--card2);color:var(--muted);font-size:14px}.flow-preview-deck{display:flex;gap:8px;margin-top:10px;padding:8px;border:1px solid var(--line);border-radius:16px}.flow-preview-item{flex:1;min-width:0;padding:12px 8px;border-radius:10px;background:var(--card2);overflow-wrap:anywhere;font-size:14px}.flow-preview .sub{margin-top:12px;font-size:14px}.flow-candidates-heading{margin:26px 0 14px!important}.entity>span{min-width:0}.flow-remove{width:auto!important;padding:0 12px;font-size:14px!important}.flow-unavailable{color:var(--warning)}
 @media(max-width:900px){.flow-mode-grid{grid-template-columns:1fr}}@media(max-width:760px){.flow-entry{align-items:stretch;flex-direction:column}.entities{grid-template-columns:minmax(0,1fr)}.flow-preview-deck{flex-direction:column}.flow-selected-row{flex-wrap:wrap}.flow-selected-row .order-actions{width:100%;justify-content:flex-end}}
+</style><style>
+.config-tabs{position:sticky;top:var(--config-tabs-top,120px);z-index:4;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:8px;margin:14px 0 22px;border:1px solid var(--line);border-radius:18px;background:#101719;box-shadow:0 10px 25px rgba(0,0,0,.22)}
+.config-tabs button{min-height:50px;border:0;border-radius:12px;background:transparent;color:var(--muted);font:inherit;font-weight:750;cursor:pointer;padding:10px 14px}.config-tabs button:hover{background:var(--surface2);color:#fff}.config-tabs button[aria-selected="true"]{background:#193b37;color:#b6fff1;box-shadow:inset 0 0 0 1px var(--accent)}.config-tabs button:focus-visible,.config-details summary:focus-visible,.room-picker input:focus-visible,.room-picker select:focus-visible,.list-toolbar input:focus-visible,.list-toolbar select:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.config-details{border:1px solid var(--line);border-radius:22px;background:#141a1d;margin:0 0 20px;overflow:hidden}.config-details>summary{cursor:pointer;padding:20px 24px;font-size:20px;font-weight:750;list-style:none}.config-details>summary::-webkit-details-marker{display:none}.config-details>summary::after{content:'⌄';float:right;color:var(--accent)}.config-details[open]>summary::after{content:'⌃'}.config-details>div{padding:0 20px 4px}.config-details .config-panel{margin-bottom:18px}
+.room-picker label,.list-toolbar label{display:block;font-size:16px;font-weight:700}.room-picker select,.list-toolbar input,.list-toolbar select,.room-search{width:100%;margin-top:8px;border:1px solid var(--line);border-radius:12px;background:var(--card2);color:#fff;padding:12px;font:inherit}.list-toolbar{display:grid;grid-template-columns:minmax(0,1fr) 220px;gap:14px;margin:0 0 12px}.list-count{margin:0 0 18px}.room-search{margin:0 0 12px}.tab-empty{padding:28px;border:1px dashed var(--line);border-radius:18px;color:var(--muted)}
+@media(max-width:760px){.config-tabs{top:0;grid-template-columns:repeat(2,minmax(0,1fr));margin-top:8px}.config-tabs button{padding:9px 7px;font-size:14px}.list-toolbar{grid-template-columns:1fr}.choice-grid,.entities{grid-template-columns:minmax(0,1fr)}.config-panel{padding:18px}.config-details>summary{padding:17px 18px}.config-details>div{padding:0 12px 2px}}
 </style><!--CORE_PAGE_STYLES--></head><body><main class="wrap">
 <!--CORE_PAGE_HEADER-->
+<nav id="configTabs" class="config-tabs" role="tablist" aria-label="Geräte und Funktionen">
+<button type="button" role="tab" data-config-tab="rooms" id="tabRoomsButton" aria-controls="areas" aria-selected="true">Räume</button>
+<button type="button" role="tab" data-config-tab="climate" id="tabClimateButton" aria-controls="climateTab" aria-selected="false">Klima</button>
+<button type="button" role="tab" data-config-tab="security" id="tabSecurityButton" aria-controls="securityTab" aria-selected="false">Sicherheit &amp; Kameras</button>
+<button type="button" role="tab" data-config-tab="devices" id="tabDevicesButton" aria-controls="devices" aria-selected="false">Geräte</button>
+</nav>
+<section id="climateTab" class="section hidden" role="tabpanel" aria-labelledby="tabClimateButton">
+<div class="config-panel room-picker"><label for="climateRoomSelect">Raum auswählen</label><select id="climateRoomSelect"></select></div>
+<div id="climateRoomContent"></div>
+<details id="climateGlobalDetails" class="config-details"><summary>Globale Vorgaben für Klima und Wetter</summary><div id="climateGlobalContent"></div></details>
+</section>
+<section id="securityTab" class="section hidden" role="tabpanel" aria-labelledby="tabSecurityButton"></section>
 <section id="areas" class="section"><div id="energyDashboardPanel" class="config-panel"><h3>Energie-Dashboard</h3><p class="sub">Optionales Dashboard mit heutigen Stromsummen und Tagesverlauf aus der bestehenden Home-Assistant-Energy-Konfiguration. Dazu müssen Energiequellen und Recorder-Statistiken in Home Assistant eingerichtet sein.</p><label class="choice"><input id="energyDashboardEnabled" type="checkbox"><span><b>Energie-Dashboard anzeigen</b><span class="sub">Verwendet Netzbezug, Einspeisung, Solar- und Batteriespeicherwerte aus Home Assistant Energy. Es werden keine Steuerbefehle gesendet.</span></span></label></div><div id="securityDashboardPanel" class="config-panel"><h3>Sicherheits-Dashboard</h3><p class="sub">Optionales Dashboard für Alarmanlagen, Kamerabilder und Tür-/Fensterkontakte. Die Ansicht zeigt nur die hier gewählten Quellen. Eine PIN wird nie gespeichert.</p><label class="choice"><input id="securityDashboardEnabled" type="checkbox"><span><b>Sicherheits-Dashboard anzeigen</b><span class="sub">Scharf-/Unscharfschalten ist nur für ausdrücklich gewählte Alarmanlagen möglich.</span></span></label><h4>Alarmanlagen</h4><div id="securityAlarmGrid" class="entities"></div><h4>Kameras und Bilder</h4><div id="securityCameraGrid" class="entities"></div><h4>Tür- und Fensterkontakte</h4><div id="securityContactGrid" class="entities"></div></div><div id="weatherPanel" class="config-panel"><h3>Wettervorhersage</h3><p class="sub">Wähle optional eine globale Wetter-Entität für Uhrzeit und Forecast auf allen Apple TVs.</p><div id="weatherGrid" class="choice-grid"></div></div><div id="thermostatStylePanel" class="config-panel"><h3>Hero-Darstellung</h3><p class="sub">Der Thermostat-Standard gilt für alle Räume und kann im Raum gezielt überschrieben werden.</p><div id="thermostatStyleGrid" class="choice-grid"></div><div class="choice-grid" style="margin-top:16px"><label class="choice"><input id="showRoomName" type="checkbox"><span><b>Raumname anzeigen</b><span class="sub">Blendet nur den Raumnamen oberhalb des Hero ein oder aus.</span></span></label><label class="choice"><input id="showRoomClimate" type="checkbox"><span><b>Raumklima anzeigen</b><span class="sub">Blendet Temperatur und Humidity-Icon unabhängig vom Raumnamen ein oder aus.</span></span></label></div></div><h2>Räume</h2><div id="areaGrid" class="grid"></div></section>
-<section id="devices" class="section hidden"><button class="back" id="backAreas">← Räume</button><div class="crumb" id="areaName"></div>
+<section id="devices" class="section hidden" role="tabpanel" aria-labelledby="tabDevicesButton"><button class="back" id="backAreas">← Räume</button><div class="crumb" id="areaName"></div>
+<div class="config-panel room-picker"><label for="deviceRoomSelect">Raum auswählen</label><select id="deviceRoomSelect"></select></div>
+<div id="deviceListSection"><div class="list-toolbar"><label for="deviceSearch">Gerät suchen<input id="deviceSearch" type="search" placeholder="Name, Typ oder Hersteller" autocomplete="off"></label><label for="deviceSort">Sortieren nach<select id="deviceSort"><option value="name">Name A–Z</option><option value="type">Typ, dann Name</option></select></label></div><p id="deviceCount" class="sub list-count" aria-live="polite"></p></div>
+<details id="deviceHelpersDetails" class="config-details"><summary>Timer und WashData</summary><div id="deviceHelpersContent"></div></details>
+<details id="deviceHeroDetails" class="config-details"><summary>Hero, Flow und Karten</summary><div id="deviceHeroContent"></div></details>
+<details id="deviceEnergyDetails" class="config-details"><summary>Energie-Dashboard</summary><div id="deviceEnergyContent"></div></details>
 <div class="config-panel flow-entry"><div><h3>Flow-Leiste</h3><div class="sub">Inhalte unter der Hero Card für diesen Raum festlegen.</div></div><button id="openRoomFlow" class="button secondary" type="button">Flow konfigurieren</button></div>
 <div id="climatePanel" class="config-panel"><h3>Thermostat</h3><p class="sub">Dieses Thermostat wird direkt im Hero bedienbar. Ohne Auswahl verwendet CouchMate automatisch das einzige freigegebene Thermostat.</p><div id="climateGrid" class="choice-grid"></div></div>
 <div id="roomThermostatStylePanel" class="config-panel"><h3>Darstellung im Hero</h3><p class="sub">Optional kann dieser Raum vom globalen Thermostat-Layout abweichen.</p><div id="roomThermostatStyleGrid" class="choice-grid"></div></div>
@@ -711,13 +735,162 @@ HTML = r'''<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name
 </main><div id="toast" class="toast hidden" role="status" aria-live="polite"></div><script>
 let data,area,device,flowArea;
 const selected={energyEnabled:false,securityEnabled:false,securityAlarms:[],securityCameras:[],securityContacts:[],devices:new Map(),temperatures:{},humidities:{},climates:{},timers:{},washdata:{},orders:{},right:{},flows:{},flowModes:{},layouts:{},thermostatStyle:'full',thermostatStyles:{},showRoomName:true,showRoomClimate:true,weather:null};
-const paths={room:'<path d="M4 10.5 12 4l8 6.5V20H4z"/><path d="M9 20v-6h6v6"/>',light:'<path d="M9 18h6"/><path d="M10 22h4"/><path d="M8.5 14.5A6 6 0 1 1 15.5 14.5c-1 .8-1.5 1.8-1.5 3h-4c0-1.2-.5-2.2-1.5-3Z"/>',switch:'<path d="M7 2v5M17 2v5"/><path d="M5 7h14v7a7 7 0 0 1-14 0Z"/><path d="M9 21h6"/>',media_player:'<rect x="3" y="5" width="18" height="13" rx="2"/><path d="m10 9 5 2.5-5 2.5Z"/><path d="M8 22h8"/>',climate:'<path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0Z"/><path d="M12 11v6"/>',cover:'<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M4 8h16M4 13h16M4 18h16"/>',sensor:'<path d="M4 19V5M4 19h16"/><path d="m7 15 3-4 3 2 5-7"/>',default:'<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M9 9h6v6H9z"/>'};
-function icon(kind){return `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[kind]||paths.default}</svg>`}
-function roomKind(name){const n=name.toLowerCase();if(n.includes('wohn'))return 'media_player';if(n.includes('küche')||n.includes('kueche'))return 'switch';if(n.includes('schlaf'))return 'light';if(n.includes('bad')||n.includes('wc'))return 'climate';if(n.includes('garten'))return 'sensor';if(n.includes('garage'))return 'cover';return 'room'}
+const paths={
+  room:'<path d="M4 10.5 12 4l8 6.5V20H4z"/><path d="M9 20v-6h6v6"/>',
+  kitchen:'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 8h16M8 5h.01M12 5h.01M16 5h.01"/><circle cx="12" cy="15" r="3"/>',
+  living:'<path d="M5 12V8a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4M4 12a2 2 0 0 0-2 2v4h20v-4a2 2 0 0 0-2-2 2 2 0 0 0-2 2H6a2 2 0 0 0-2-2ZM5 18v2m14-2v2"/>',
+  bedroom:'<path d="M3 20V8m0 8h18M6 16v-5h15v9M6 11V8a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3"/>',
+  bathroom:'<path d="M3 13h18v2a6 6 0 0 1-6 6H9a6 6 0 0 1-6-6v-2ZM5 13V6a3 3 0 0 1 6 0M9 6h4M7 21v1m10-1v1"/>',
+  office:'<path d="M3 12h18v2H3zM6 14v7m12-7v7M9 8V4h7v8"/><path d="M9 8h7"/>',
+  dining:'<path d="M4 11h16v3H4zM6 14v6m12-6v6M4 4v5m2-5v5m-2 0h2m12-5v5m2-5v5m-2 0h2"/>',
+  laundry:'<rect x="4" y="2" width="16" height="20" rx="2"/><circle cx="12" cy="13" r="5"/><path d="M7 5h.01M10 5h.01M13 5h4"/>',
+  garage:'<path d="M3 9 12 3l9 6v12H3zM6 12h12v9H6zM6 16h12"/>',
+  garden:'<path d="M12 3 5 13h4l-3 5h12l-3-5h4L12 3ZM12 18v4"/>',
+  hallway:'<rect x="6" y="3" width="12" height="18" rx="1"/><path d="M14 12h.01M3 21h18"/>',
+  light:'<path d="M9 18h6M10 22h4M8.5 14.5A6 6 0 1 1 15.5 14.5c-1 .8-1.5 1.8-1.5 3h-4c0-1.2-.5-2.2-1.5-3Z"/>',
+  switch:'<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M9 10h6"/>',
+  plug:'<path d="M8 3v5m8-5v5M5 8h14v5a7 7 0 0 1-14 0V8ZM12 20v2"/>',
+  media_player:'<rect x="3" y="4" width="18" height="14" rx="2"/><path d="m10 8 5 3-5 3zM8 22h8"/>',
+  climate:'<path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0ZM12 11v6"/>',
+  cover:'<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M4 8h16M4 13h16M4 18h16"/>',
+  camera:'<rect x="3" y="6" width="15" height="13" rx="2"/><circle cx="10.5" cy="12.5" r="3"/><path d="m18 10 3-2v9l-3-2M7 6l1-2h5l1 2"/>',
+  alarm:'<path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5zM12 7v6m0 3h.01"/>',
+  contact:'<rect x="4" y="3" width="10" height="18" rx="1"/><path d="M14 4h6v16h-6M11 12h.01"/>',
+  sensor:'<path d="M4 19V5M4 19h16m-13-4 3-4 3 2 5-7"/>',
+  vacuum:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M8 4V2m8 2V2"/>',
+  dishwasher:'<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M4 7h16M8 5h.01M11 5h.01"/><path d="m8 16 2 2 5-5"/>',
+  scene:'<path d="m12 2 1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9L12 2ZM19 18l.6 1.4L21 20l-1.4.6L19 22l-.6-1.4L17 20l1.4-.6L19 18Z"/>',
+  script:'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8m-8 4h4"/>',
+  lock:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 15v2"/>',
+  fan:'<circle cx="12" cy="12" r="2"/><path d="M12 10c-2-6 1-8 3-7s2 5-1 7M14 12c6-2 8 1 7 3s-5 2-7-1M12 14c2 6-1 8-3 7s-2-5 1-7M10 12c-6 2-8-1-7-3s5-2 7 1"/>',
+  timer:'<circle cx="12" cy="13" r="8"/><path d="M12 13V8m0 5 3 2M9 2h6"/>',
+  default:'<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M9 9h6v6H9z"/>'
+};
+function icon(kind){const aliases={alarm_control_panel:'alarm',binary_sensor:'contact',image:'camera',weather:'garden'};return `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[aliases[kind]||kind]||paths.default}</svg>`}
+const iconText=value=>String(value||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+function roomKind(area){
+  const mdi=iconText(area.icon).replace(/^mdi:/,'');
+  // HA area icon is authoritative when it names a recognizable room/object.
+  const groups=[
+    [/sofa|couch|living|television/, 'living'],
+    [/table-(chair|dining)|silverware-fork-knife/, 'dining'],
+    [/stove|oven|pot-steam|silverware|chef-hat|fridge|food|kitchen/, 'kitchen'],
+    [/bed|sleep/, 'bedroom'],
+    [/bathtub|shower|toilet|bathroom|water-pump/, 'bathroom'],
+    [/desk|laptop|office|briefcase/, 'office'],
+    [/washing-machine|tumble-dryer|laundry/, 'laundry'],
+    [/garage|car/, 'garage'],
+    [/tree|flower|garden|patio|pool/, 'garden'],
+    [/door|stairs|hallway/, 'hallway'],
+    [/lightbulb|lamp/, 'light']
+  ];
+  for(const [pattern,kind] of groups)if(pattern.test(mdi))return kind;
+  const name=iconText(area.name).replace(/ß/g,'ss');
+  if(/wohn|living|lounge|sofa/.test(name))return 'living';
+  if(/kuch|kuech|kitch|koch/.test(name))return 'kitchen';
+  if(/schlaf|bed|gastzimmer/.test(name))return 'bedroom';
+  if(/bad|bath|dusch|wc|toilet/.test(name))return 'bathroom';
+  if(/buro|buero|office|arbeit/.test(name))return 'office';
+  if(/esszimmer|dining/.test(name))return 'dining';
+  if(/wasch|laundry|hauswirtschaft/.test(name))return 'laundry';
+  if(/garage|carport/.test(name))return 'garage';
+  if(/garten|garden|terrass|balkon|outdoor/.test(name))return 'garden';
+  if(/flur|diele|hall|eingang/.test(name))return 'hallway';
+  return 'room';
+}
+function deviceKind(device){
+  const name=iconText([device.name,device.model].join(' ')).replace(/ß/g,'ss');
+  const domains=new Set((device.entities||[]).map(e=>e.domain));
+  // Appliance names beat a generic sensor/switch domain.
+  if(/waschmaschine|washer|washing.machine|trockner|dryer/.test(name))return 'laundry';
+  if(/spulmaschine|spuelmaschine|dishwasher/.test(name))return 'dishwasher';
+  if(/saugroboter|robot.vacuum|staubsauger|vacuum/.test(name)||domains.has('vacuum'))return 'vacuum';
+  if(/kamera|camera|doorbell|turklingel|tuerklingel/.test(name)||domains.has('camera'))return 'camera';
+  if(/alarm|sirene|siren/.test(name)||domains.has('alarm_control_panel'))return 'alarm';
+  if(/thermostat|heizung|radiator/.test(name)||domains.has('climate'))return 'climate';
+  if(/rollladen|rolladen|jalousie|markise|blind|shutter/.test(name)||domains.has('cover'))return 'cover';
+  if(/fernseher|tv|lautsprecher|speaker|sonos/.test(name)||domains.has('media_player'))return 'media_player';
+  if(/steckdose|plug|socket/.test(name))return 'plug';
+  if(/turkontakt|tuerkontakt|fensterkontakt|door.sensor|window.sensor/.test(name))return 'contact';
+  if(domains.has('light'))return 'light';
+  if(domains.has('switch'))return 'switch';
+  if(domains.has('sensor')||domains.has('binary_sensor'))return 'sensor';
+  return 'default';
+}
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const auth=()=>{try{const t=JSON.parse(localStorage.getItem('hassTokens')||'{}');return t.access_token?{'Authorization':'Bearer '+t.access_token}:{} }catch(e){return {}}};
 async function api(url,options={}){options.headers={...(options.headers||{}),...auth()};const r=await fetch(url,options);if(r.status===401||r.status===403)throw new Error('AUTH');if(!r.ok)throw new Error('HTTP '+r.status);return r}
 function showToast(type,title,text){toast.className='toast '+type;toast.innerHTML=`<strong>${esc(title)}</strong><span>${esc(text)}</span>`;clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>toast.classList.add('hidden'),6000)}
+let activeConfigTab='rooms';
+const configTabNames=new Set(['rooms','climate','security','devices']);
+function setupConfigTabs(){
+    areas.setAttribute('role','tabpanel');areas.setAttribute('aria-labelledby','tabRoomsButton');
+    securityTab.append(securityDashboardPanel);
+    climateRoomContent.append(climatePanel,roomThermostatStylePanel,temperaturePanel,humidityPanel);
+    climateGlobalContent.append(weatherPanel,thermostatStylePanel);
+    deviceHelpersContent.append(timerPanel,washdataPanel);
+    deviceHeroContent.append(openRoomFlow.closest('.config-panel'),heroCardStylePanel,heroOrderPanel,heroRightPanel);
+    deviceEnergyContent.append(energyDashboardPanel);
+    deviceListSection.append(deviceGrid.previousElementSibling,deviceGrid);
+    const search=document.createElement('input');search.id='roomSearch';search.type='search';search.className='room-search';search.placeholder='Raum suchen';search.setAttribute('aria-label','Raum suchen');search.autocomplete='off';search.oninput=renderRoomTiles;areas.insertBefore(search,areaGrid);
+    const count=document.createElement('p');count.id='roomCount';count.className='sub list-count';count.setAttribute('aria-live','polite');areas.insertBefore(count,areaGrid);
+    for(const [name,grid,open] of [['Alarmanlagen',securityAlarmGrid,true],['Kameras und Bilder',securityCameraGrid,false],['Tür- und Fensterkontakte',securityContactGrid,false]]){
+        const heading=grid.previousElementSibling;
+        const details=document.createElement('details');details.className='config-details';details.open=open;
+        const summary=document.createElement('summary');summary.textContent=name;
+        heading.replaceWith(details);details.append(summary,grid);
+    }
+    const buttons=[...configTabs.querySelectorAll('[data-config-tab]')];
+    for(const button of buttons){
+        button.onclick=()=>showConfigTab(button.dataset.configTab,area?.id,true);
+        button.onkeydown=event=>{
+            const index=buttons.indexOf(button),next=event.key==='ArrowRight'?buttons[(index+1)%buttons.length]:event.key==='ArrowLeft'?buttons[(index+buttons.length-1)%buttons.length]:event.key==='Home'?buttons[0]:event.key==='End'?buttons[buttons.length-1]:null;
+            if(next){event.preventDefault();next.focus();next.click()}
+        };
+    }
+    climateRoomSelect.onchange=()=>showConfigTab('climate',climateRoomSelect.value,true);
+    deviceRoomSelect.onchange=()=>showConfigTab('devices',deviceRoomSelect.value,true);
+    deviceSearch.oninput=renderDeviceGrid;
+    try{const saved=localStorage.getItem('couchmate.configurator.deviceSort');if(['name','type'].includes(saved))deviceSort.value=saved}catch(e){}
+    deviceSort.onchange=()=>{try{localStorage.setItem('couchmate.configurator.deviceSort',deviceSort.value)}catch(e){}renderDeviceGrid()};
+    const header=document.querySelector('.top');
+    if(header&&window.ResizeObserver){const update=()=>document.documentElement.style.setProperty('--config-tabs-top',`${header.getBoundingClientRect().height}px`);new ResizeObserver(update).observe(header);update()}
+}
+function renderRoomSelectors(){
+    const options=data.areas.map(item=>`<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('');
+    for(const select of [climateRoomSelect,deviceRoomSelect]){select.innerHTML=options;select.disabled=!data.areas.length;if(area)select.value=area.id}
+}
+function updateConfigTabState(tab){
+    activeConfigTab=tab;
+    for(const button of configTabs.querySelectorAll('[data-config-tab]')){
+        const active=button.dataset.configTab===tab;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;
+    }
+    configTabs.classList.remove('hidden');
+    areas.classList.toggle('hidden',tab!=='rooms');
+    climateTab.classList.toggle('hidden',tab!=='climate');
+    securityTab.classList.toggle('hidden',tab!=='security');
+    devices.classList.toggle('hidden',tab!=='devices');
+    entities.classList.add('hidden');
+}
+function showConfigTab(tab,roomID,recordHistory=false){
+    if(!configTabNames.has(tab))tab='rooms';
+    const nextArea=data.areas.find(item=>item.id===roomID)||area||data.areas[0];
+    if(nextArea?.id!==area?.id&&deviceSearch)deviceSearch.value='';
+    area=nextArea;
+    showCoreSection('configurator');
+    if(tab==='rooms')renderAreas();
+    else if(tab==='security')renderSecurityDashboard();
+    else renderRoomSettings();
+    renderRoomSelectors();
+    updateConfigTabState(tab);
+    if(recordHistory){
+        const url=new URL(location.href);url.searchParams.delete('section');
+        if(tab==='rooms')url.searchParams.delete('tab');else url.searchParams.set('tab',tab);
+        if(area)url.searchParams.set('room',area.id);else url.searchParams.delete('room');
+        history.pushState({},'',url);
+    }
+    window.scrollTo({top:0});
+}
 function deviceState(d){return selected.devices.get(d.id)||{mode:'none',entities:new Set()}}
 function setDeviceState(id,state){if(state.mode==='none'||(state.mode==='entities'&&!state.entities.size))selected.devices.delete(id);else selected.devices.set(id,state)}
 function tile(title,sub,kind,state,fn){const b=document.createElement('button');const cls=state==='all'?' active':state==='partial'?' partial':'';b.className='tile'+cls;const status=state==='all'?'Alle Funktionen':state==='partial'?sub.selection:'';b.innerHTML=`<div class="icon">${icon(kind)}</div><h3>${esc(title)}</h3><div class="sub">${esc(sub.text)}</div>${status?`<span class="state">${esc(status)}</span>`:''}`;b.onclick=fn;return b}
@@ -772,6 +945,8 @@ function moveHero(index,delta){const order=selected.orders[area.id]||[];const ta
 function showCoreSection(section){
     const isFlow=section==='flow';
     flowSection.classList.toggle('hidden',!isFlow);
+    configTabs.classList.toggle('hidden',isFlow);
+    if(isFlow){climateTab.classList.add('hidden');securityTab.classList.add('hidden')}
     pageTitle.textContent=isFlow?'Flow-Leiste':'Geräte & Funktionen';
     pageDescription.textContent=isFlow?'Vorschläge und eigene Inhalte unter der Hero Card':'Räume, Quellen und Funktionen';
     document.title='CouchMate Core Dev Preview – '+pageTitle.textContent;
@@ -781,12 +956,12 @@ function navigateCore(section,roomID){
     const url=new URL(location.href);
     if(section==='flow')url.searchParams.set('section','flow');else url.searchParams.delete('section');
     history.pushState({},'',url);
-    if(section==='flow')renderFlowPage(roomID);else renderAreas();
+    if(section==='flow')renderFlowPage(roomID);else showConfigTab(activeConfigTab,roomID||area?.id);
     window.scrollTo({top:0});
 }
 function renderFlowPage(roomID){
     showCoreSection('flow');
-    areas.classList.add('hidden');devices.classList.add('hidden');entities.classList.add('hidden');
+    areas.classList.add('hidden');climateTab.classList.add('hidden');securityTab.classList.add('hidden');devices.classList.add('hidden');entities.classList.add('hidden');
     flowArea=data.areas.find(item=>item.id===(roomID||flowArea?.id||area?.id))||data.areas[0];
     flowRoomSelect.innerHTML=data.areas.map(item=>`<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('');
     flowRoomSelect.disabled=!flowArea;
@@ -843,7 +1018,7 @@ function renderSecurityDashboard(){
         if(!candidates.length){const empty=document.createElement('p');empty.className='sub';empty.textContent='Keine passenden Home-Assistant-Entitäten vorhanden.';grid.append(empty);continue}
         for(const entity of candidates){
             const row=document.createElement('label');row.className='entity';
-            row.innerHTML=`<input type="checkbox"><span><b>${esc(entity.name)}</b><span class="sub">${esc(entity.entity_id)}</span></span>`;
+            row.innerHTML=`<input type="checkbox"><div class="icon" style="width:34px;height:34px;margin:0">${icon(kind)}</div><span><b>${esc(entity.name)}</b><span class="sub">${esc(entity.entity_id)}</span></span>`;
             const input=row.querySelector('input');input.checked=selected[field].includes(entity.entity_id);
             input.onchange=()=>{selected[field]=input.checked?[...new Set([...selected[field],entity.entity_id])]:selected[field].filter(id=>id!==entity.entity_id)};
             grid.append(row);
@@ -903,8 +1078,15 @@ function renderAreas(){
     showRoomName.onchange=()=>selected.showRoomName=showRoomName.checked;
     showRoomClimate.checked=selected.showRoomClimate;
     showRoomClimate.onchange=()=>selected.showRoomClimate=showRoomClimate.checked;
+    renderRoomTiles();
+}
+function renderRoomTiles(){
     areaGrid.innerHTML='';
-    for(const a of data.areas){
+    const query=document.getElementById('roomSearch')?.value.trim().toLocaleLowerCase('de')||'';
+    const rooms=[...data.areas].sort((a,b)=>a.name.localeCompare(b.name,'de',{numeric:true,sensitivity:'base'})).filter(item=>!query||item.name.toLocaleLowerCase('de').includes(query));
+    document.getElementById('roomCount').textContent=`${rooms.length} von ${data.areas.length} Räumen`;
+    if(!rooms.length){const empty=document.createElement('p');empty.className='tab-empty';empty.textContent=data.areas.length?'Kein Raum passt zur Suche.':'Noch keine Räume in Home Assistant vorhanden.';areaGrid.append(empty)}
+    for(const a of rooms){
         const selectedCount=a.devices.reduce((n,d)=>{
             const st=deviceState(d);
             return n+(st.mode==='all'?d.entities.length:st.mode==='entities'?st.entities.size:0);
@@ -912,16 +1094,56 @@ function renderAreas(){
         const timerCount=(a.timer_candidates||[]).filter(timer=>!timer.area_unassigned||(selected.timers[a.id]||[]).includes(timer.entity_id)).length;
         const washdataCount=(a.washdata_candidates||[]).filter(item=>!item.area_unassigned||(selected.washdata[a.id]||[]).includes(item.device_id)).length;
         const subtitle=`${a.devices.length} Geräte${timerCount?` · ${timerCount} Timer`:''}${washdataCount?` · ${washdataCount} WashData`:''}`;
-        areaGrid.append(tile(a.name,{text:subtitle,selection:selectedCount?`${selectedCount} Funktionen gewählt`:''},roomKind(a.name),areaSelectionState(a),()=>{area=a;renderDevices()}));
+        areaGrid.append(tile(a.name,{text:subtitle,selection:selectedCount?`${selectedCount} Funktionen gewählt`:''},roomKind(a),areaSelectionState(a),()=>showConfigTab('devices',a.id,true)));
     }
 }
-function renderDevices(){showCoreSection('configurator');openRoomFlow.onclick=()=>navigateCore('flow',area.id);areas.classList.add('hidden');devices.classList.remove('hidden');entities.classList.add('hidden');areaName.textContent=area.name;deviceGrid.innerHTML='';renderChoices(climatePanel,climateGrid,area.climate_candidates,selected.climates[area.id],value=>{if(value)selected.climates[area.id]=value;else delete selected.climates[area.id]},`climate-${area.id}`,'Automatisch','Einziges freigegebenes Thermostat verwenden');renderThermostatStyles(roomThermostatStylePanel,roomThermostatStyleGrid,selected.thermostatStyles[area.id]??null,value=>{if(value)selected.thermostatStyles[area.id]=value;else delete selected.thermostatStyles[area.id]},`roomThermostatStyle-${area.id}`,true);renderHeroCardStyles();renderChoices(temperaturePanel,temperatureGrid,area.temperature_candidates,selected.temperatures[area.id],value=>{if(value)selected.temperatures[area.id]=value;else delete selected.temperatures[area.id]},`temperature-${area.id}`,'Thermostat-Fallback','Istwert des Thermostats verwenden');renderChoices(humidityPanel,humidityGrid,area.humidity_candidates,selected.humidities[area.id],value=>{if(value)selected.humidities[area.id]=value;else delete selected.humidities[area.id]},`humidity-${area.id}`,'Thermostat-Fallback','Luftfeuchte des Thermostats verwenden');renderHeroOrder();renderHeroRight();renderTimerChoices();renderWashdataChoices();for(const d of area.devices){const domain=d.entities[0]?.domain||'default';const st=deviceState(d);const subtitle=[d.manufacturer,d.model].filter(Boolean).join(' · ')||`${d.entities.length} Funktionen`;deviceGrid.append(tile(d.name,{text:subtitle,selection:st.mode==='entities'?`${st.entities.size} ${st.entities.size===1?'Funktion':'Funktionen'} gewählt`:''},domain,deviceSelectionState(d),()=>{device=d;renderEntities()}))}}
+function deviceType(d){const kind=deviceKind(d);return kind==='default'?d.entities[0]?.domain||'default':kind}
+function deviceTypeName(kind){return ({light:'Licht',switch:'Schalter',plug:'Steckdose',cover:'Rollladen',climate:'Klima',camera:'Kamera',image:'Bild',media_player:'Medien',sensor:'Sensor',binary_sensor:'Kontakt',contact:'Tür-/Fensterkontakt',fan:'Ventilator',lock:'Schloss',vacuum:'Staubsauger',alarm_control_panel:'Alarmanlage',alarm:'Alarmanlage',laundry:'Waschen & Trocknen',dishwasher:'Spülmaschine',scene:'Szene',script:'Skript',timer:'Timer'})[kind]||'Sonstiges'}
+function renderDeviceGrid(){
+    deviceGrid.innerHTML='';
+    if(!area){deviceCount.textContent='Keine Räume vorhanden.';return}
+    const query=deviceSearch.value.trim().toLocaleLowerCase('de');
+    const collator=new Intl.Collator('de',{numeric:true,sensitivity:'base'});
+    const devices=[...area.devices].filter(d=>!query||[d.name,d.manufacturer,d.model,deviceTypeName(deviceType(d)),...d.entities.map(e=>e.name),...d.entities.map(e=>e.entity_id)].some(value=>String(value||'').toLocaleLowerCase('de').includes(query)));
+    devices.sort((a,b)=>deviceSort.value==='type'
+        ?collator.compare(deviceTypeName(deviceType(a)),deviceTypeName(deviceType(b)))||collator.compare(a.name,b.name)
+        :collator.compare(a.name,b.name));
+    deviceCount.textContent=`${devices.length} von ${area.devices.length} Geräten${query?' · Die Suche ändert keine Auswahl.':''}`;
+    if(!devices.length){const empty=document.createElement('p');empty.className='tab-empty';empty.textContent=area.devices.length?'Kein Gerät passt zur Suche.':'In diesem Raum sind keine Geräte vorhanden.';deviceGrid.append(empty)}
+    for(const d of devices){
+        const st=deviceState(d),kind=deviceType(d);
+        const subtitle=[deviceTypeName(kind),d.manufacturer,d.model].filter(Boolean).join(' · ');
+        deviceGrid.append(tile(d.name,{text:subtitle,selection:st.mode==='entities'?`${st.entities.size} ${st.entities.size===1?'Funktion':'Funktionen'} gewählt`:''},deviceKind(d),deviceSelectionState(d),()=>{device=d;renderEntities()}));
+    }
+}
+function renderRoomSettings(){
+    if(!area){
+        areaName.textContent='Noch keine Räume vorhanden';
+        climateRoomContent.classList.add('hidden');
+        deviceHelpersDetails.classList.add('hidden');deviceHeroDetails.classList.add('hidden');
+        renderDeviceGrid();
+        return;
+    }
+    climateRoomContent.classList.remove('hidden');
+    deviceHelpersDetails.classList.remove('hidden');deviceHeroDetails.classList.remove('hidden');
+    areaName.textContent=area.name;
+    openRoomFlow.onclick=()=>navigateCore('flow',area.id);
+    renderChoices(climatePanel,climateGrid,area.climate_candidates,selected.climates[area.id],value=>{if(value)selected.climates[area.id]=value;else delete selected.climates[area.id]},`climate-${area.id}`,'Automatisch','Einziges freigegebenes Thermostat verwenden');
+    renderThermostatStyles(roomThermostatStylePanel,roomThermostatStyleGrid,selected.thermostatStyles[area.id]??null,value=>{if(value)selected.thermostatStyles[area.id]=value;else delete selected.thermostatStyles[area.id]},`roomThermostatStyle-${area.id}`,true);
+    renderHeroCardStyles();
+    renderChoices(temperaturePanel,temperatureGrid,area.temperature_candidates,selected.temperatures[area.id],value=>{if(value)selected.temperatures[area.id]=value;else delete selected.temperatures[area.id]},`temperature-${area.id}`,'Thermostat-Fallback','Istwert des Thermostats verwenden');
+    renderChoices(humidityPanel,humidityGrid,area.humidity_candidates,selected.humidities[area.id],value=>{if(value)selected.humidities[area.id]=value;else delete selected.humidities[area.id]},`humidity-${area.id}`,'Thermostat-Fallback','Luftfeuchte des Thermostats verwenden');
+    renderHeroOrder();renderHeroRight();renderTimerChoices();renderWashdataChoices();renderDeviceGrid();
+}
+function renderDevices(){showConfigTab('devices',area?.id)}
+
 function renderEntities(){devices.classList.add('hidden');entities.classList.remove('hidden');deviceName.textContent=`${area.name} · ${device.name}`;entityGrid.innerHTML='';let st=deviceState(device);selectWholeDevice.checked=st.mode==='all';selectWholeDevice.onchange=()=>{if(selectWholeDevice.checked)setDeviceState(device.id,{mode:'all',entities:new Set()});else setDeviceState(device.id,{mode:'none',entities:new Set()});renderEntities()};for(const e of device.entities){st=deviceState(device);const row=document.createElement('label');row.className='entity';row.innerHTML=`<input type="checkbox" ${(st.mode==='all'||(st.mode==='entities'&&st.entities.has(e.entity_id)))?'checked':''} ${st.mode==='all'?'disabled':''}><span><b>${esc(e.name)}</b><span class="sub">${esc(e.entity_id)}</span></span>`;const c=row.querySelector('input');c.onchange=()=>{const current=deviceState(device);const ids=current.mode==='entities'?new Set(current.entities):new Set();if(c.checked)ids.add(e.entity_id);else ids.delete(e.entity_id);setDeviceState(device.id,{mode:'entities',entities:ids})};entityGrid.append(row)}}
 function buildSelectionModel(){const model={version:2,energy_dashboard:{enabled:selected.energyEnabled},security_dashboard:{enabled:selected.securityEnabled,alarm_entity_ids:[...new Set(selected.securityAlarms)],camera_entity_ids:[...new Set(selected.securityCameras)],contact_entity_ids:[...new Set(selected.securityContacts)]},weather:selected.weather,thermostat_card_style:selected.thermostatStyle,show_room_name:selected.showRoomName,show_room_climate:selected.showRoomClimate,areas:{}};for(const a of data.areas){const cfg={devices:{}};const flowMode=selected.flowModes[a.id]||'automatic';if(flowMode!=='automatic')cfg.flow_mode=flowMode;if(selected.temperatures[a.id])cfg.temperature=selected.temperatures[a.id];if(selected.humidities[a.id])cfg.humidity=selected.humidities[a.id];if(selected.climates[a.id])cfg.climate=selected.climates[a.id];if(selected.thermostatStyles[a.id])cfg.thermostat_card_style=selected.thermostatStyles[a.id];cfg.hero_layout={...roomHeroLayout(a),thermostat_card_style:selected.thermostatStyles[a.id]??selected.thermostatStyle};const order=normalizedHeroOrder(a).map(e=>e.entity_id);if(order.length)cfg.hero_order=order;const right=(selected.right[a.id]||[]).slice(0,12);if(right.length)cfg.hero_right_entities=right;const flow=(selected.flows[a.id]||[]).slice(0,3);if(flow.length)cfg.flow_entities=flow;const timers=[...new Set(selected.timers[a.id]||[])];if(timers.length)cfg.timer_entities=timers;const washdata=[...new Set(selected.washdata[a.id]||[])];if(washdata.length)cfg.washdata_devices=washdata;for(const d of a.devices){const st=deviceState(d);if(st.mode==='all')cfg.devices[d.id]={mode:'all',entities:[]};else if(st.mode==='entities'&&st.entities.size)cfg.devices[d.id]={mode:'entities',entities:[...st.entities]}}if(cfg.temperature||cfg.humidity||cfg.climate||cfg.thermostat_card_style||cfg.hero_order||cfg.hero_right_entities||cfg.flow_entities||cfg.timer_entities||cfg.washdata_devices||cfg.flow_mode||Object.keys(cfg.devices).length)model.areas[a.id]=cfg}return model}
-api('/api/couchmate/configurator/data').then(r=>r.json()).then(j=>{data=j;selected.energyEnabled=j.energy_dashboard?.enabled===true;selected.securityEnabled=j.security_dashboard?.enabled===true;selected.securityAlarms=[...new Set(j.security_dashboard?.alarm_entity_ids||[])];selected.securityCameras=[...new Set(j.security_dashboard?.camera_entity_ids||[])];selected.securityContacts=[...new Set(j.security_dashboard?.contact_entity_ids||[])];selected.weather=j.weather_entity??null;selected.thermostatStyle=j.thermostat_card_style??'full';selected.showRoomName=j.show_room_name??true;selected.showRoomClimate=j.show_room_climate??true;for(const a of data.areas){if(a.temperature_entity)selected.temperatures[a.id]=a.temperature_entity;if(a.humidity_entity)selected.humidities[a.id]=a.humidity_entity;if(a.climate_entity)selected.climates[a.id]=a.climate_entity;const heroLayout=a.hero_layout||{};selected.layouts[a.id]={device_card_style:heroLayout.device_card_style||'bubble',camera_card_style:heroLayout.camera_card_style||'large',media_card_style:heroLayout.media_card_style||'transport'};if(heroLayout.thermostat_card_style)selected.thermostatStyles[a.id]=heroLayout.thermostat_card_style;else if(a.thermostat_card_style)selected.thermostatStyles[a.id]=a.thermostat_card_style;selected.orders[a.id]=a.hero_order||[];selected.right[a.id]=[...new Set(a.hero_right_entities||[])].slice(0,12);selected.flows[a.id]=[...new Set(a.flow_entities||[])].slice(0,3);selected.timers[a.id]=[...new Set(a.timer_entities||[])];selected.washdata[a.id]=[...new Set(a.washdata_devices||[])];selected.flowModes[a.id]=['automatic','custom','hidden'].includes(a.flow_mode)?a.flow_mode:'automatic';for(const d of a.devices){const ids=new Set(d.entities.filter(e=>e.selected).map(e=>e.entity_id));if(d.selection_mode==='all')selected.devices.set(d.id,{mode:'all',entities:new Set()});else if(ids.size)selected.devices.set(d.id,{mode:'entities',entities:ids})}}if(new URL(location.href).searchParams.get('section')==='flow')renderFlowPage();else renderAreas()}).catch(e=>showToast('error','Konfigurator konnte nicht geladen werden',e.message==='AUTH'?'Öffne die Seite im selben Browser, in dem du bei Home Assistant angemeldet bist.':e.message));
+setupConfigTabs();
+api('/api/couchmate/configurator/data').then(r=>r.json()).then(j=>{data=j;selected.energyEnabled=j.energy_dashboard?.enabled===true;selected.securityEnabled=j.security_dashboard?.enabled===true;selected.securityAlarms=[...new Set(j.security_dashboard?.alarm_entity_ids||[])];selected.securityCameras=[...new Set(j.security_dashboard?.camera_entity_ids||[])];selected.securityContacts=[...new Set(j.security_dashboard?.contact_entity_ids||[])];selected.weather=j.weather_entity??null;selected.thermostatStyle=j.thermostat_card_style??'full';selected.showRoomName=j.show_room_name??true;selected.showRoomClimate=j.show_room_climate??true;for(const a of data.areas){if(a.temperature_entity)selected.temperatures[a.id]=a.temperature_entity;if(a.humidity_entity)selected.humidities[a.id]=a.humidity_entity;if(a.climate_entity)selected.climates[a.id]=a.climate_entity;const heroLayout=a.hero_layout||{};selected.layouts[a.id]={device_card_style:heroLayout.device_card_style||'bubble',camera_card_style:heroLayout.camera_card_style||'large',media_card_style:heroLayout.media_card_style||'transport'};if(heroLayout.thermostat_card_style)selected.thermostatStyles[a.id]=heroLayout.thermostat_card_style;else if(a.thermostat_card_style)selected.thermostatStyles[a.id]=a.thermostat_card_style;selected.orders[a.id]=a.hero_order||[];selected.right[a.id]=[...new Set(a.hero_right_entities||[])].slice(0,12);selected.flows[a.id]=[...new Set(a.flow_entities||[])].slice(0,3);selected.timers[a.id]=[...new Set(a.timer_entities||[])];selected.washdata[a.id]=[...new Set(a.washdata_devices||[])];selected.flowModes[a.id]=['automatic','custom','hidden'].includes(a.flow_mode)?a.flow_mode:'automatic';for(const d of a.devices){const ids=new Set(d.entities.filter(e=>e.selected).map(e=>e.entity_id));if(d.selection_mode==='all')selected.devices.set(d.id,{mode:'all',entities:new Set()});else if(ids.size)selected.devices.set(d.id,{mode:'entities',entities:ids})}}renderAreas();const route=new URL(location.href);if(route.searchParams.get('section')==='flow')renderFlowPage(route.searchParams.get('room'));else showConfigTab(route.searchParams.get('tab')||'rooms',route.searchParams.get('room'))}).catch(e=>showToast('error','Konfigurator konnte nicht geladen werden',e.message==='AUTH'?'Öffne die Seite im selben Browser, in dem du bei Home Assistant angemeldet bist.':e.message));
 document.querySelectorAll('.nav a[data-core-section]').forEach(link=>{if(link.dataset.coreSection==='management')return;link.onclick=event=>{if(!data)return;event.preventDefault();navigateCore(link.dataset.coreSection)}});
-window.addEventListener('popstate',()=>{if(!data)return;if(new URL(location.href).searchParams.get('section')==='flow')renderFlowPage();else renderAreas()});
-backAreas.onclick=renderAreas;backDevices.onclick=renderDevices;save.onclick=async()=>{save.disabled=true;save.textContent='Speichert …';showToast('', 'Auswahl wird gespeichert','Bitte einen Moment warten.');try{const r=await api('/api/couchmate/configurator/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({selection_model:buildSelectionModel()})});const j=await r.json();if(!j.success)throw new Error('Unbekannter Speicherfehler');showToast('ok','Auswahl erfolgreich gespeichert',`${j.area_count} Räume · ${j.entity_count} einzelne Funktionen · ${j.climate_count} Thermostate · Wetter ${j.weather_configured?'fest gewählt':'automatisch'}`)}catch(e){showToast('error','Speichern fehlgeschlagen',e.message==='AUTH'?'Die Home-Assistant-Anmeldung ist abgelaufen. Bitte Home Assistant neu laden.':e.message)}finally{save.disabled=false;save.textContent='Auswahl speichern'}};
+window.addEventListener('popstate',()=>{if(!data)return;const route=new URL(location.href);if(route.searchParams.get('section')==='flow')renderFlowPage(route.searchParams.get('room'));else showConfigTab(route.searchParams.get('tab')||'rooms',route.searchParams.get('room'))});
+backAreas.onclick=()=>showConfigTab('rooms',area?.id,true);backDevices.onclick=()=>showConfigTab('devices',area?.id);save.onclick=async()=>{save.disabled=true;save.textContent='Speichert …';showToast('', 'Auswahl wird gespeichert','Bitte einen Moment warten.');try{const r=await api('/api/couchmate/configurator/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({selection_model:buildSelectionModel()})});const j=await r.json();if(!j.success)throw new Error('Unbekannter Speicherfehler');showToast('ok','Auswahl erfolgreich gespeichert',`${j.area_count} Räume · ${j.entity_count} einzelne Funktionen · ${j.climate_count} Thermostate · Wetter ${j.weather_configured?'fest gewählt':'automatisch'}`)}catch(e){showToast('error','Speichern fehlgeschlagen',e.message==='AUTH'?'Die Home-Assistant-Anmeldung ist abgelaufen. Bitte Home Assistant neu laden.':e.message)}finally{save.disabled=false;save.textContent='Auswahl speichern'}};
 </script></body></html>'''
 
 
