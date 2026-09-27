@@ -1,8 +1,15 @@
 # Changelog
 
+## 27.09.2026 – Core 1.4.0-beta.15 · Energie-Einspeisung
+
+- Die Energie-API übernimmt Netz-Einspeisung aus Home Assistants `stat_energy_to` beziehungsweise älteren `flow_to`-Einträgen auch dann, wenn eine weitere konfigurierte Einspeisequelle heute keine Recorder-Daten liefert. Vorhandene Werte werden summiert; `energy_dashboard.coverage` und `hourly[].coverage` kennzeichnen unvollständige Quellgruppen mit `configured_sources` und `reporting_sources`.
+- Für die laufende Stunde bleiben stündliche Energiewerte verfügbar, wenn eine Quelle keine Fünf-Minuten-Statistiken liefert. Liegen beide Auflösungen vor, wird die Stunde nicht doppelt gezählt. Ein gemessener Wert von `0 kWh` bleibt erhalten.
+- Der berechnete Hausverbrauch wird bei unvollständigen Quellgruppen weiterhin nicht als vollständiger Wert ausgegeben. Der Core-Endpoint enthält keine Stromzähler-Rohstände und benötigt weiterhin eine konfigurierte Home-Assistant-Energieansicht.
+- Geprüft mit 17 Energie-Regressionstests, 16 Flow-, 9 Konfigurator- und 25 Sicherheits-Tests sowie der Release-Validierung.
+
 ## 27.09.2026 – Core-Konfigurator
 
-Änderungen gegenüber `Optional-Dashboards-2026-09-26`. Die Integrationsversion bleibt `1.4.0-beta.14`; geändert wurde `custom_components/couchmate/configurator.py`.
+Änderungen gegenüber `Optional-Dashboards-2026-09-26`. Diese Konfigurator-Revision trug die Version `1.4.0-beta.14`; das Paket enthält inzwischen den oben beschriebenen Energiefix als `1.4.0-beta.15`.
 
 ### Neu
 

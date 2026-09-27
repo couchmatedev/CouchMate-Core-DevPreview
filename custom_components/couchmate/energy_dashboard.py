@@ -142,7 +142,7 @@ def aggregate_energy_statistics(
     devices: list[dict[str, str]],
     stats: Mapping[str, Any],
     zone: ZoneInfo | timezone,
-) -> tuple[dict[str, float], list[dict[str, Any]], list[dict[str, Any]], str | None]:
+) -> tuple[dict[str, float], list[dict[str, Any]], list[dict[str, Any]], str | None, dict[str, dict[str, int]]]:
     """Combine Recorder changes, preserving missing values as missing."""
     totals: dict[str, float] = {}
     buckets: dict[str, dict[str, float]] = defaultdict(dict)
@@ -170,21 +170,34 @@ def aggregate_energy_statistics(
                 if started is not None:
                     latest_start = max(latest_start or started, started)
 
-    for role, statistic_ids in sources.items():
-        if statistic_ids and not statistic_ids.issubset(total_ids[role]):
-            totals.pop(role, None)
-
     required_roles = {role for role, ids in sources.items() if ids}
-    _add_home_consumption(totals, required_roles)
+    coverage = {
+        role: {
+            "configured_sources": len(statistic_ids),
+            "reporting_sources": len(total_ids[role]),
+        }
+        for role, statistic_ids in sources.items() if statistic_ids
+    }
+    if all(sources[role].issubset(total_ids[role]) for role in required_roles):
+        _add_home_consumption(totals, required_roles)
     hourly = []
     for hour in sorted(buckets, key=lambda item: datetime.fromisoformat(item).timestamp()):
         values = buckets[hour]
-        for role, statistic_ids in sources.items():
-            if statistic_ids and not statistic_ids.issubset(bucket_ids[hour][role]):
-                values.pop(role, None)
-        _add_home_consumption(values, required_roles)
+        partial_coverage = {
+            role: {
+                "configured_sources": len(statistic_ids),
+                "reporting_sources": len(bucket_ids[hour][role]),
+            }
+            for role, statistic_ids in sources.items()
+            if statistic_ids and 0 < len(bucket_ids[hour][role]) < len(statistic_ids)
+        }
+        if all(sources[role].issubset(bucket_ids[hour][role]) for role in required_roles):
+            _add_home_consumption(values, required_roles)
         if values:
-            hourly.append({"start": hour, **values})
+            item: dict[str, Any] = {"start": hour, **values}
+            if partial_coverage:
+                item["coverage"] = partial_coverage
+            hourly.append(item)
 
     device_values = []
     for device in devices:
@@ -207,7 +220,7 @@ def aggregate_energy_statistics(
         datetime.fromtimestamp(latest_start, timezone.utc).isoformat()
         if latest_start is not None else None
     )
-    return totals, hourly, device_values, latest_data_at
+    return totals, hourly, device_values, latest_data_at, coverage
 
 
 async def _async_compute_energy_dashboard_payload(
@@ -235,6 +248,7 @@ async def _async_compute_energy_dashboard_payload(
         "as_of": local_now.isoformat(),
         "unit": "kWh",
         "totals": {},
+        "coverage": {},
         "hourly": [],
         "devices": [],
         "latest_data_at": None,
@@ -274,30 +288,51 @@ async def _async_compute_energy_dashboard_payload(
         utc_now = local_now.astimezone(timezone.utc)
         current_hour = local_now.replace(minute=0, second=0, microsecond=0).astimezone(timezone.utc)
         stats: dict[str, list[dict[str, Any]]] = {}
-        if current_hour > utc_start:
-            stats = await recorder.async_add_executor_job(
-                statistics_during_period,
-                hass, utc_start, current_hour, statistic_ids, "hour",
-                {"energy": "kWh"}, {"change"},
-            )
+        # Energy's hourly statistics may include a source with no short-term
+        # rows in the current hour (notably externally imported statistics).
+        # Query through now so its current-hour value is not lost. Short-term
+        # rows, where present, replace that one hourly row below.
+        stats = await recorder.async_add_executor_job(
+            statistics_during_period,
+            hass, utc_start, utc_now, statistic_ids, "hour",
+            {"energy": "kWh"}, {"change"},
+        )
         recent = await recorder.async_add_executor_job(
             statistics_during_period,
             hass, current_hour, utc_now, statistic_ids, "5minute",
             {"energy": "kWh"}, {"change"},
         )
+        current_hour_start = current_hour.timestamp()
         for statistic_id, rows in recent.items():
+            # A source can appear in both result sets. Prefer the finer
+            # current-hour changes, while retaining the hourly fallback for
+            # sources without usable five-minute statistics.
+            if any(
+                isinstance(row, Mapping)
+                and (started := _finite_number(row.get("start"))) is not None
+                and started >= current_hour_start
+                and _finite_number(row.get("change")) is not None
+                for row in rows
+            ):
+                stats[statistic_id] = [
+                    row for row in stats.get(statistic_id, [])
+                    if not isinstance(row, Mapping)
+                    or (started := _finite_number(row.get("start"))) is None
+                    or started < current_hour_start
+                ]
             stats.setdefault(statistic_id, []).extend(rows)
     except Exception:  # noqa: BLE001
         _LOGGER.exception("Unable to read Home Assistant Energy statistics")
         return {**base, "status": "recorder_unavailable"}
 
-    totals, hourly, device_values, latest_data_at = aggregate_energy_statistics(
+    totals, hourly, device_values, latest_data_at, coverage = aggregate_energy_statistics(
         sources, devices, stats, zone,
     )
     value = {
         **base,
         "status": "ok" if totals or any("total" in item for item in device_values) else "no_statistics",
         "totals": totals,
+        "coverage": coverage,
         "hourly": hourly,
         "devices": device_values,
         "latest_data_at": latest_data_at,
@@ -372,6 +407,7 @@ async def async_energy_dashboard_payload(
         "as_of": local_now.isoformat(),
         "unit": "kWh",
         "totals": {},
+        "coverage": {},
         "hourly": [],
         "devices": [],
         "latest_data_at": None,
