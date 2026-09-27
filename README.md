@@ -1,32 +1,27 @@
-# CouchMate Core – übersichtlicher Konfigurator (27.09.2026)
+# Changelog
 
-Dieses Paket enthält die aktualisierte Home-Assistant-Integration unter
-`custom_components/couchmate`. Es ist ein **Core-Update** und enthält keine
-neuen iOS- oder tvOS-App-Builds. Der Core wurde nicht in Home Assistant
-installiert.
+## 27.09.2026 – Core-Konfigurator
 
-## Neuer Konfigurator
+Änderungen gegenüber `Optional-Dashboards-2026-09-26`. Die Integrationsversion bleibt `1.4.0-beta.14`; geändert wurde `custom_components/couchmate/configurator.py`.
 
-**Geräte & Funktionen** ist in **Räume**, **Klima**, **Sicherheit & Kameras**
-und **Geräte** aufgeteilt. Klima und Geräte haben eine direkte Raumauswahl.
-Räume lassen sich suchen; Geräte lassen sich suchen und wahlweise nach Name
-oder Typ sortieren. Timer, WashData, Hero/Flow und das Energie-Dashboard sind
-aufklappbar. Die Auswahl und die zentrale Schaltfläche **Auswahl speichern**
-gelten weiterhin für alle Reiter gemeinsam.
+### Neu
 
-Raumkacheln leiten ein passendes Icon aus dem in Home Assistant gewählten
-Bereichs-Icon ab, wenn dessen Bedeutung erkannt wird. Sonst wird der Raumname
-verwendet. Geräte nutzen Icons passend zu Bezeichnung und Typ; unbekannte
-Geräte erhalten ein neutrales Symbol. Die Icons im Web-Konfigurator sind
-lokale SVGs und keine SF-Symbol-Dateien.
+- **Geräte & Funktionen** hat vier Reiter: **Räume**, **Klima**, **Sicherheit & Kameras** und **Geräte**. Die bisherige gemeinsame Auswahl und die Schaltfläche **Auswahl speichern** gelten weiter für alle Reiter.
+- Räume lassen sich suchen. Im Klima- und Geräte-Reiter kann der Raum direkt gewechselt werden.
+- Geräte lassen sich nach Name, Typ, Hersteller, Modell und Entität suchen sowie wahlweise nach **Name** oder **Typ, dann Name** sortieren. Die Sortierwahl bleibt im Browser gespeichert.
+- Raumkacheln zeigen ein zum Home-Assistant-Bereichs-Icon passendes Symbol, sofern es erkannt wird, etwa Herd für `mdi:stove` und Sofa für `mdi:sofa`. Sonst entscheidet der Raumname; unbekannte Räume erhalten ein Haussymbol.
+- Gerätekacheln erhalten Symbole nach Bezeichnung und Entitätstyp, unter anderem für Rollläden, Thermostate, Kameras, Alarmanlagen, Türkontakte, Waschmaschinen und Staubsauger. Szenen und Skripte haben eigene Symbole.
 
-## Stand und Prüfung
+### Umgeordnet
 
-Die Integrationsversion ist `1.4.0-beta.14`. Die lokalen Core-Tests für
-Speichern, Flow, Sicherheit und Energie, die Prüfung des eingebetteten
-JavaScript und die Release-Validierung sind erfolgreich. Die Bedienoberfläche
-wurde noch nicht mit einer echten Home-Assistant-Instanz visuell geprüft.
+- Thermostat, Raumtemperatur und Luftfeuchtigkeit liegen unter **Klima**; globale Wetter- und Thermostatvorgaben sind dort aufklappbar.
+- Alarmanlagen, Kameras/Bilder und Tür-/Fensterkontakte liegen unter **Sicherheit & Kameras** in getrennten aufklappbaren Gruppen.
+- Timer/WashData, Hero/Flow/Karten und das optionale Energie-Dashboard sind im Geräte-Reiter aufklappbar. Die Geräteliste steht vor diesen Einstellungen.
+- Auf schmalen Bildschirmen stehen die Reiter in zwei Spalten; Auswahlfelder nutzen eine Spalte statt seitlich überzulaufen.
 
-Der Quellstand liegt in
-`/Users/fabianvocke/Documents/CouchMate-Core-DevPreview`.
-Das ältere Paket `Optional-Dashboards-2026-09-26` bleibt unverändert.
+### Korrigiert
+
+- Die Sortierung nach Typ verwendet denselben erkannten Gerätetyp wie das Geräte-Icon. Geräte mit mehreren Entitätsarten werden dadurch nicht mehr nach der zufällig ersten Entität eingeordnet.
+- `mdi:silverware-fork-knife` wird als Esszimmer-Symbol statt als Küchensymbol erkannt.
+Dateien filtern
+
