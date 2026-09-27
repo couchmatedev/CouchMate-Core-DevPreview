@@ -682,11 +682,11 @@ HTML = r'''<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name
 .flow-entry,.flow-content-heading{display:flex;align-items:center;justify-content:space-between;gap:20px}.flow-content-heading h2{margin:0}.flow-content-heading{margin-bottom:12px}.flow-entry .button{flex-shrink:0}.button.secondary{background:var(--card2);color:#fff;border:1px solid var(--line)}.flow-room-label{display:block;font-size:19px;font-weight:700}.flow-mode-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.flow-mode-grid .choice:has(input:checked){outline:2px solid var(--accent);background:#172523}.flow-preview{margin-top:24px;padding:20px;border:1px dashed var(--line);border-radius:18px;text-align:center}.flow-preview-hero{padding:20px;border-radius:12px;background:var(--card2);color:var(--muted);font-size:14px}.flow-preview-deck{display:flex;gap:8px;margin-top:10px;padding:8px;border:1px solid var(--line);border-radius:16px}.flow-preview-item{flex:1;min-width:0;padding:12px 8px;border-radius:10px;background:var(--card2);overflow-wrap:anywhere;font-size:14px}.flow-preview .sub{margin-top:12px;font-size:14px}.flow-candidates-heading{margin:26px 0 14px!important}.entity>span{min-width:0}.flow-remove{width:auto!important;padding:0 12px;font-size:14px!important}.flow-unavailable{color:var(--warning)}
 @media(max-width:900px){.flow-mode-grid{grid-template-columns:1fr}}@media(max-width:760px){.flow-entry{align-items:stretch;flex-direction:column}.entities{grid-template-columns:minmax(0,1fr)}.flow-preview-deck{flex-direction:column}.flow-selected-row{flex-wrap:wrap}.flow-selected-row .order-actions{width:100%;justify-content:flex-end}}
 </style><style>
-.config-tabs{position:sticky;top:var(--config-tabs-top,120px);z-index:4;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:8px;margin:14px 0 22px;border:1px solid var(--line);border-radius:18px;background:#101719;box-shadow:0 10px 25px rgba(0,0,0,.22)}
+.config-tabs{position:sticky;top:var(--config-tabs-top,120px);z-index:4;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;padding:8px;margin:14px 0 22px;border:1px solid var(--line);border-radius:18px;background:#101719;box-shadow:0 10px 25px rgba(0,0,0,.22)}
 .config-tabs button{min-height:50px;border:0;border-radius:12px;background:transparent;color:var(--muted);font:inherit;font-weight:750;cursor:pointer;padding:10px 14px}.config-tabs button:hover{background:var(--surface2);color:#fff}.config-tabs button[aria-selected="true"]{background:#193b37;color:#b6fff1;box-shadow:inset 0 0 0 1px var(--accent)}.config-tabs button:focus-visible,.config-details summary:focus-visible,.room-picker input:focus-visible,.room-picker select:focus-visible,.list-toolbar input:focus-visible,.list-toolbar select:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .config-details{border:1px solid var(--line);border-radius:22px;background:#141a1d;margin:0 0 20px;overflow:hidden}.config-details>summary{cursor:pointer;padding:20px 24px;font-size:20px;font-weight:750;list-style:none}.config-details>summary::-webkit-details-marker{display:none}.config-details>summary::after{content:'⌄';float:right;color:var(--accent)}.config-details[open]>summary::after{content:'⌃'}.config-details>div{padding:0 20px 4px}.config-details .config-panel{margin-bottom:18px}
 .room-picker label,.list-toolbar label{display:block;font-size:16px;font-weight:700}.room-picker select,.list-toolbar input,.list-toolbar select,.room-search{width:100%;margin-top:8px;border:1px solid var(--line);border-radius:12px;background:var(--card2);color:#fff;padding:12px;font:inherit}.list-toolbar{display:grid;grid-template-columns:minmax(0,1fr) 220px;gap:14px;margin:0 0 12px}.list-count{margin:0 0 18px}.room-search{margin:0 0 12px}.tab-empty{padding:28px;border:1px dashed var(--line);border-radius:18px;color:var(--muted)}
-@media(max-width:760px){.config-tabs{top:0;grid-template-columns:repeat(2,minmax(0,1fr));margin-top:8px}.config-tabs button{padding:9px 7px;font-size:14px}.list-toolbar{grid-template-columns:1fr}.choice-grid,.entities{grid-template-columns:minmax(0,1fr)}.config-panel{padding:18px}.config-details>summary{padding:17px 18px}.config-details>div{padding:0 12px 2px}}
+@media(max-width:760px){.config-tabs{top:0;grid-template-columns:repeat(2,minmax(0,1fr));margin-top:8px}.config-tabs button{padding:9px 7px;font-size:14px}.config-tabs [data-config-tab="energy"]{grid-column:1/-1}.list-toolbar{grid-template-columns:1fr}.choice-grid,.entities{grid-template-columns:minmax(0,1fr)}.config-panel{padding:18px}.config-details>summary{padding:17px 18px}.config-details>div{padding:0 12px 2px}}
 </style><!--CORE_PAGE_STYLES--></head><body><main class="wrap">
 <!--CORE_PAGE_HEADER-->
 <nav id="configTabs" class="config-tabs" role="tablist" aria-label="Geräte und Funktionen">
@@ -694,6 +694,7 @@ HTML = r'''<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name
 <button type="button" role="tab" data-config-tab="climate" id="tabClimateButton" aria-controls="climateTab" aria-selected="false">Klima</button>
 <button type="button" role="tab" data-config-tab="security" id="tabSecurityButton" aria-controls="securityTab" aria-selected="false">Sicherheit &amp; Kameras</button>
 <button type="button" role="tab" data-config-tab="devices" id="tabDevicesButton" aria-controls="devices" aria-selected="false">Geräte</button>
+<button type="button" role="tab" data-config-tab="energy" id="tabEnergyButton" aria-controls="energyTab" aria-selected="false">Energie</button>
 </nav>
 <section id="climateTab" class="section hidden" role="tabpanel" aria-labelledby="tabClimateButton">
 <div class="config-panel room-picker"><label for="climateRoomSelect">Raum auswählen</label><select id="climateRoomSelect"></select></div>
@@ -701,13 +702,13 @@ HTML = r'''<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name
 <details id="climateGlobalDetails" class="config-details"><summary>Globale Vorgaben für Klima und Wetter</summary><div id="climateGlobalContent"></div></details>
 </section>
 <section id="securityTab" class="section hidden" role="tabpanel" aria-labelledby="tabSecurityButton"></section>
+<section id="energyTab" class="section hidden" role="tabpanel" aria-labelledby="tabEnergyButton"></section>
 <section id="areas" class="section"><div id="energyDashboardPanel" class="config-panel"><h3>Energie-Dashboard</h3><p class="sub">Optionales Dashboard mit heutigen Stromsummen und Tagesverlauf aus der bestehenden Home-Assistant-Energy-Konfiguration. Dazu müssen Energiequellen und Recorder-Statistiken in Home Assistant eingerichtet sein.</p><label class="choice"><input id="energyDashboardEnabled" type="checkbox"><span><b>Energie-Dashboard anzeigen</b><span class="sub">Verwendet Netzbezug, Einspeisung, Solar- und Batteriespeicherwerte aus Home Assistant Energy. Es werden keine Steuerbefehle gesendet.</span></span></label></div><div id="securityDashboardPanel" class="config-panel"><h3>Sicherheits-Dashboard</h3><p class="sub">Optionales Dashboard für Alarmanlagen, Kamerabilder und Tür-/Fensterkontakte. Die Ansicht zeigt nur die hier gewählten Quellen. Eine PIN wird nie gespeichert.</p><label class="choice"><input id="securityDashboardEnabled" type="checkbox"><span><b>Sicherheits-Dashboard anzeigen</b><span class="sub">Scharf-/Unscharfschalten ist nur für ausdrücklich gewählte Alarmanlagen möglich.</span></span></label><h4>Alarmanlagen</h4><div id="securityAlarmGrid" class="entities"></div><h4>Kameras und Bilder</h4><div id="securityCameraGrid" class="entities"></div><h4>Tür- und Fensterkontakte</h4><div id="securityContactGrid" class="entities"></div></div><div id="weatherPanel" class="config-panel"><h3>Wettervorhersage</h3><p class="sub">Wähle optional eine globale Wetter-Entität für Uhrzeit und Forecast auf allen Apple TVs.</p><div id="weatherGrid" class="choice-grid"></div></div><div id="thermostatStylePanel" class="config-panel"><h3>Hero-Darstellung</h3><p class="sub">Der Thermostat-Standard gilt für alle Räume und kann im Raum gezielt überschrieben werden.</p><div id="thermostatStyleGrid" class="choice-grid"></div><div class="choice-grid" style="margin-top:16px"><label class="choice"><input id="showRoomName" type="checkbox"><span><b>Raumname anzeigen</b><span class="sub">Blendet nur den Raumnamen oberhalb des Hero ein oder aus.</span></span></label><label class="choice"><input id="showRoomClimate" type="checkbox"><span><b>Raumklima anzeigen</b><span class="sub">Blendet Temperatur und Humidity-Icon unabhängig vom Raumnamen ein oder aus.</span></span></label></div></div><h2>Räume</h2><div id="areaGrid" class="grid"></div></section>
 <section id="devices" class="section hidden" role="tabpanel" aria-labelledby="tabDevicesButton"><button class="back" id="backAreas">← Räume</button><div class="crumb" id="areaName"></div>
 <div class="config-panel room-picker"><label for="deviceRoomSelect">Raum auswählen</label><select id="deviceRoomSelect"></select></div>
 <div id="deviceListSection"><div class="list-toolbar"><label for="deviceSearch">Gerät suchen<input id="deviceSearch" type="search" placeholder="Name, Typ oder Hersteller" autocomplete="off"></label><label for="deviceSort">Sortieren nach<select id="deviceSort"><option value="name">Name A–Z</option><option value="type">Typ, dann Name</option></select></label></div><p id="deviceCount" class="sub list-count" aria-live="polite"></p></div>
 <details id="deviceHelpersDetails" class="config-details"><summary>Timer und WashData</summary><div id="deviceHelpersContent"></div></details>
 <details id="deviceHeroDetails" class="config-details"><summary>Hero, Flow und Karten</summary><div id="deviceHeroContent"></div></details>
-<details id="deviceEnergyDetails" class="config-details"><summary>Energie-Dashboard</summary><div id="deviceEnergyContent"></div></details>
 <div class="config-panel flow-entry"><div><h3>Flow-Leiste</h3><div class="sub">Inhalte unter der Hero Card für diesen Raum festlegen.</div></div><button id="openRoomFlow" class="button secondary" type="button">Flow konfigurieren</button></div>
 <div id="climatePanel" class="config-panel"><h3>Thermostat</h3><p class="sub">Dieses Thermostat wird direkt im Hero bedienbar. Ohne Auswahl verwendet CouchMate automatisch das einzige freigegebene Thermostat.</p><div id="climateGrid" class="choice-grid"></div></div>
 <div id="roomThermostatStylePanel" class="config-panel"><h3>Darstellung im Hero</h3><p class="sub">Optional kann dieser Raum vom globalen Thermostat-Layout abweichen.</p><div id="roomThermostatStyleGrid" class="choice-grid"></div></div>
@@ -822,7 +823,7 @@ const auth=()=>{try{const t=JSON.parse(localStorage.getItem('hassTokens')||'{}')
 async function api(url,options={}){options.headers={...(options.headers||{}),...auth()};const r=await fetch(url,options);if(r.status===401||r.status===403)throw new Error('AUTH');if(!r.ok)throw new Error('HTTP '+r.status);return r}
 function showToast(type,title,text){toast.className='toast '+type;toast.innerHTML=`<strong>${esc(title)}</strong><span>${esc(text)}</span>`;clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>toast.classList.add('hidden'),6000)}
 let activeConfigTab='rooms';
-const configTabNames=new Set(['rooms','climate','security','devices']);
+const configTabNames=new Set(['rooms','climate','security','devices','energy']);
 function setupConfigTabs(){
     areas.setAttribute('role','tabpanel');areas.setAttribute('aria-labelledby','tabRoomsButton');
     securityTab.append(securityDashboardPanel);
@@ -830,7 +831,7 @@ function setupConfigTabs(){
     climateGlobalContent.append(weatherPanel,thermostatStylePanel);
     deviceHelpersContent.append(timerPanel,washdataPanel);
     deviceHeroContent.append(openRoomFlow.closest('.config-panel'),heroCardStylePanel,heroOrderPanel,heroRightPanel);
-    deviceEnergyContent.append(energyDashboardPanel);
+    energyTab.append(energyDashboardPanel);
     deviceListSection.append(deviceGrid.previousElementSibling,deviceGrid);
     const search=document.createElement('input');search.id='roomSearch';search.type='search';search.className='room-search';search.placeholder='Raum suchen';search.setAttribute('aria-label','Raum suchen');search.autocomplete='off';search.oninput=renderRoomTiles;areas.insertBefore(search,areaGrid);
     const count=document.createElement('p');count.id='roomCount';count.className='sub list-count';count.setAttribute('aria-live','polite');areas.insertBefore(count,areaGrid);
@@ -870,6 +871,7 @@ function updateConfigTabState(tab){
     climateTab.classList.toggle('hidden',tab!=='climate');
     securityTab.classList.toggle('hidden',tab!=='security');
     devices.classList.toggle('hidden',tab!=='devices');
+    energyTab.classList.toggle('hidden',tab!=='energy');
     entities.classList.add('hidden');
 }
 function showConfigTab(tab,roomID,recordHistory=false){
@@ -880,6 +882,7 @@ function showConfigTab(tab,roomID,recordHistory=false){
     showCoreSection('configurator');
     if(tab==='rooms')renderAreas();
     else if(tab==='security')renderSecurityDashboard();
+    else if(tab==='energy')renderEnergyDashboard();
     else renderRoomSettings();
     renderRoomSelectors();
     updateConfigTabState(tab);
@@ -946,7 +949,7 @@ function showCoreSection(section){
     const isFlow=section==='flow';
     flowSection.classList.toggle('hidden',!isFlow);
     configTabs.classList.toggle('hidden',isFlow);
-    if(isFlow){climateTab.classList.add('hidden');securityTab.classList.add('hidden')}
+    if(isFlow){climateTab.classList.add('hidden');securityTab.classList.add('hidden');energyTab.classList.add('hidden')}
     pageTitle.textContent=isFlow?'Flow-Leiste':'Geräte & Funktionen';
     pageDescription.textContent=isFlow?'Vorschläge und eigene Inhalte unter der Hero Card':'Räume, Quellen und Funktionen';
     document.title='CouchMate Core Dev Preview – '+pageTitle.textContent;
@@ -961,7 +964,7 @@ function navigateCore(section,roomID){
 }
 function renderFlowPage(roomID){
     showCoreSection('flow');
-    areas.classList.add('hidden');climateTab.classList.add('hidden');securityTab.classList.add('hidden');devices.classList.add('hidden');entities.classList.add('hidden');
+    areas.classList.add('hidden');climateTab.classList.add('hidden');securityTab.classList.add('hidden');energyTab.classList.add('hidden');devices.classList.add('hidden');entities.classList.add('hidden');
     flowArea=data.areas.find(item=>item.id===(roomID||flowArea?.id||area?.id))||data.areas[0];
     flowRoomSelect.innerHTML=data.areas.map(item=>`<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('');
     flowRoomSelect.disabled=!flowArea;
@@ -1026,6 +1029,10 @@ function renderSecurityDashboard(){
     }
 }
 function renderWeather(){renderChoices(weatherPanel,weatherGrid,data.weather_candidates,selected.weather,value=>selected.weather=value,'globalWeather','Automatisch','Erste verfügbare Wetter-Entität verwenden')}
+function renderEnergyDashboard(){
+    energyDashboardEnabled.checked=selected.energyEnabled;
+    energyDashboardEnabled.onchange=()=>selected.energyEnabled=energyDashboardEnabled.checked;
+}
 function renderTimerChoices(){
     const candidates=area.timer_candidates||[];
     timerGrid.innerHTML='';
@@ -1071,8 +1078,7 @@ function renderAreas(){
     areas.classList.remove('hidden');devices.classList.add('hidden');entities.classList.add('hidden');
     renderWeather();
     renderSecurityDashboard();
-    energyDashboardEnabled.checked=selected.energyEnabled;
-    energyDashboardEnabled.onchange=()=>selected.energyEnabled=energyDashboardEnabled.checked;
+    renderEnergyDashboard();
     renderThermostatStyles(thermostatStylePanel,thermostatStyleGrid,selected.thermostatStyle,value=>selected.thermostatStyle=value||'full','globalThermostatStyle',false);
     showRoomName.checked=selected.showRoomName;
     showRoomName.onchange=()=>selected.showRoomName=showRoomName.checked;
